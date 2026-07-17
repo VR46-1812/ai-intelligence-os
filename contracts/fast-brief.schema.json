@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ai-intelligence-os/schemas/fast-brief-v1.json",
+  "title": "FastBriefV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "work_id", "change", "problem", "contribution", "evidence_state", "limitations", "code_state", "technical_relevance", "commercial_relevance", "recommended_action", "claims"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "work_id": {"type": "string", "minLength": 1},
+    "change": {"type": "string", "minLength": 1, "maxLength": 320},
+    "problem": {"type": "string"},
+    "contribution": {"type": "string"},
+    "evidence_state": {"enum": ["strong", "moderate", "weak", "unknown"]},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "code_state": {"enum": ["official", "author_linked", "community", "none_found", "unknown"]},
+    "technical_relevance": {"type": "string"},
+    "commercial_relevance": {"type": "string"},
+    "recommended_action": {"enum": ["deep_dive", "track", "read_source", "ignore", "manual_review"]},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "type", "evidence_ids"],
+        "properties": {
+          "text": {"type": "string"},
+          "type": {"enum": ["fact", "interpretation", "recommendation", "hypothesis"]},
+          "evidence_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}

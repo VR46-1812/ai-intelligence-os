@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ai-intelligence-os/schemas/deep-dive-v1.json",
+  "title": "DeepDiveReportV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "work_id", "title", "publication_status",
+    "executive_significance", "problem_context", "method",
+    "evaluation", "limitations", "reproducibility", "production_applications",
+    "commercial_hypotheses", "learning_path", "skeptic_findings", "claims"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "work_id": {"type": "string", "minLength": 1},
+    "title": {"type": "string", "minLength": 1},
+    "publication_status": {
+      "enum": ["unknown", "preprint", "submitted", "accepted", "published", "withdrawn"]
+    },
+    "executive_significance": {"$ref": "#/$defs/section"},
+    "problem_context": {"$ref": "#/$defs/section"},
+    "method": {
+      "allOf": [{"$ref": "#/$defs/section"}],
+      "description": "First-principles method, architecture, algorithms and assumptions."
+    },
+    "evaluation": {"$ref": "#/$defs/section"},
+    "limitations": {"$ref": "#/$defs/section"},
+    "reproducibility": {"$ref": "#/$defs/reproducibility"},
+    "production_applications": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/application"}
+    },
+    "commercial_hypotheses": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/commercialHypothesis"}
+    },
+    "learning_path": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["concept", "reason", "sequence"],
+        "properties": {
+          "concept": {"type": "string"},
+          "reason": {"type": "string"},
+          "sequence": {"type": "integer", "minimum": 1},
+          "source_ids": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "skeptic_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "finding", "affected_claim_ids", "resolution"],
+        "properties": {
+          "severity": {"enum": ["info", "warning", "critical"]},
+          "finding": {"type": "string"},
+          "affected_claim_ids": {"type": "array", "items": {"type": "string"}},
+          "resolution": {"enum": ["accepted", "qualified", "rejected", "unresolved"]}
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/claim"}
+    }
+  },
+  "$defs": {
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["markdown", "confidence", "claim_ids"],
+      "properties": {
+        "markdown": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "claim_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text", "type", "importance", "verification_status", "evidence_ids"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "text": {"type": "string", "minLength": 1},
+        "type": {"enum": ["fact", "interpretation", "recommendation", "hypothesis"]},
+        "importance": {"enum": ["minor", "major", "critical"]},
+        "verification_status": {"enum": ["unsupported", "supported", "conflicted", "rejected"]},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}},
+        "qualifier": {"type": ["string", "null"]}
+      }
+    },
+    "reproducibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "repository_urls", "assets", "hardware_fit", "steps", "risks"],
+      "properties": {
+        "status": {"enum": ["unknown", "insufficient", "partial", "promising", "reproduced"]},
+        "repository_urls": {"type": "array", "items": {"type": "string", "format": "uri"}},
+        "assets": {"type": "array", "items": {"type": "string"}},
+        "hardware_fit": {"enum": ["fits", "fits_with_reduction", "does_not_fit", "unknown"]},
+        "steps": {"type": "array", "items": {"type": "string"}},
+        "risks": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "system_change", "expected_value", "risks", "claim_ids"],
+      "properties": {
+        "name": {"type": "string"},
+        "system_change": {"type": "string"},
+        "expected_value": {"type": "string"},
+        "risks": {"type": "array", "items": {"type": "string"}},
+        "claim_ids": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "commercialHypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["problem", "buyer", "workflow", "pilot", "value_metric", "confidence", "evidence_ids", "unknowns"],
+      "properties": {
+        "problem": {"type": "string"},
+        "buyer": {"type": "string"},
+        "workflow": {"type": "string"},
+        "pilot": {"type": "string"},
+        "value_metric": {"type": "string"},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "evidence_ids": {"type": "array", "items": {"type": "string"}},
+        "unknowns": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

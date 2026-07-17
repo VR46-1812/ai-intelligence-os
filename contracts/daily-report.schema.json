@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.ai-intelligence-os/schemas/daily-report-v1.json",
+  "title": "DailyIntelligenceReportV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_date", "pipeline", "top_technical", "top_commercial", "deep_dives", "important_updates", "learning_focus", "coverage_gaps"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "report_date": {"type": "string", "format": "date"},
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["discovered", "normalized", "filtered", "shortlisted", "briefed", "analyzed", "failed", "run_id"],
+      "properties": {
+        "discovered": {"type": "integer", "minimum": 0},
+        "normalized": {"type": "integer", "minimum": 0},
+        "filtered": {"type": "integer", "minimum": 0},
+        "shortlisted": {"type": "integer", "minimum": 0},
+        "briefed": {"type": "integer", "minimum": 0},
+        "analyzed": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0},
+        "run_id": {"type": "string"}
+      }
+    },
+    "top_technical": {"type": "array", "items": {"$ref": "#/$defs/rankedItem"}},
+    "top_commercial": {"type": "array", "items": {"$ref": "#/$defs/rankedItem"}},
+    "deep_dives": {"type": "array", "items": {"type": "string"}},
+    "important_updates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["work_id", "update_type", "summary"],
+        "properties": {
+          "work_id": {"type": "string"},
+          "update_type": {"enum": ["paper_revision", "decision", "code_release", "model_release", "correction", "withdrawal"]},
+          "summary": {"type": "string"}
+        }
+      }
+    },
+    "learning_focus": {"type": "array", "items": {"type": "string"}},
+    "coverage_gaps": {"type": "array", "items": {"type": "string"}}
+  },
+  "$defs": {
+    "rankedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["work_id", "title", "score", "reason", "status"],
+      "properties": {
+        "work_id": {"type": "string"},
+        "title": {"type": "string"},
+        "score": {"type": "number", "minimum": 0, "maximum": 100},
+        "reason": {"type": "string"},
+        "status": {"enum": ["unreviewed", "briefed", "analyzed", "reviewed", "verified"]}
+      }
+    }
+  }
+}

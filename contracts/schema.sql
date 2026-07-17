@@ -1,0 +1,350 @@
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  applied_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sources (
+  id TEXT PRIMARY KEY,
+  source_key TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  trust_tier TEXT NOT NULL CHECK (trust_tier IN ('A','B','C','D')),
+  base_url TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  poll_interval_minutes INTEGER NOT NULL CHECK (poll_interval_minutes > 0),
+  minimum_request_interval_ms INTEGER NOT NULL DEFAULT 0,
+  connector_version TEXT NOT NULL,
+  config_json TEXT NOT NULL DEFAULT '{}',
+  cursor_json TEXT,
+  health_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (health_status IN ('unknown','healthy','degraded','failed','disabled')),
+  last_attempt_at TEXT,
+  last_success_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS source_records (
+  id TEXT PRIMARY KEY,
+  source_id TEXT NOT NULL REFERENCES sources(id),
+  upstream_id TEXT NOT NULL,
+  upstream_version TEXT,
+  canonical_url TEXT NOT NULL,
+  payload_sha256 TEXT NOT NULL,
+  raw_payload_path TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  published_at TEXT,
+  updated_at_upstream TEXT,
+  normalization_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (normalization_status IN ('pending','normalized','rejected','failed')),
+  error_code TEXT,
+  error_detail TEXT,
+  UNIQUE(source_id, upstream_id, payload_sha256)
+);
+
+CREATE INDEX IF NOT EXISTS idx_source_records_observed
+  ON source_records(source_id, observed_at DESC);
+
+CREATE TABLE IF NOT EXISTS works (
+  id TEXT PRIMARY KEY,
+  work_type TEXT NOT NULL
+    CHECK (work_type IN ('paper','model','dataset','repository','article','release','other')),
+  canonical_title TEXT NOT NULL,
+  normalized_title TEXT NOT NULL,
+  abstract TEXT,
+  language TEXT NOT NULL DEFAULT 'en',
+  publication_status TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (publication_status IN ('unknown','preprint','submitted','accepted','published','withdrawn')),
+  first_published_at TEXT,
+  current_version_id TEXT,
+  lifecycle_state TEXT NOT NULL DEFAULT 'discovered'
+    CHECK (lifecycle_state IN ('discovered','normalized','shortlisted','acquired','parsed','briefed','analyzed','reviewed','verified','filtered','failed','rejected','superseded')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_works_state_date
+  ON works(lifecycle_state, first_published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_works_normalized_title
+  ON works(normalized_title);
+
+CREATE TABLE IF NOT EXISTS external_ids (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  id_type TEXT NOT NULL CHECK (id_type IN ('doi','arxiv','openreview','github','huggingface','url','other')),
+  normalized_value TEXT NOT NULL,
+  raw_value TEXT NOT NULL,
+  source_record_id TEXT REFERENCES source_records(id),
+  created_at TEXT NOT NULL,
+  UNIQUE(id_type, normalized_value)
+);
+
+CREATE TABLE IF NOT EXISTS work_versions (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  version_label TEXT NOT NULL,
+  content_sha256 TEXT,
+  title TEXT NOT NULL,
+  abstract TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  source_record_id TEXT REFERENCES source_records(id),
+  published_at TEXT,
+  observed_at TEXT NOT NULL,
+  is_current INTEGER NOT NULL DEFAULT 0 CHECK (is_current IN (0,1)),
+  UNIQUE(work_id, version_label)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_one_current_work_version
+  ON work_versions(work_id) WHERE is_current = 1;
+
+CREATE TABLE IF NOT EXISTS authors (
+  id TEXT PRIMARY KEY,
+  normalized_name TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  orcid TEXT UNIQUE,
+  affiliation_text TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS work_authors (
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  author_id TEXT NOT NULL REFERENCES authors(id),
+  author_order INTEGER NOT NULL CHECK (author_order >= 1),
+  is_corresponding INTEGER NOT NULL DEFAULT 0 CHECK (is_corresponding IN (0,1)),
+  PRIMARY KEY(work_id, author_id),
+  UNIQUE(work_id, author_order)
+);
+
+CREATE TABLE IF NOT EXISTS topics (
+  id TEXT PRIMARY KEY,
+  topic_key TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  parent_topic_id TEXT REFERENCES topics(id),
+  description TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0,1))
+);
+
+CREATE TABLE IF NOT EXISTS work_topics (
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  topic_id TEXT NOT NULL REFERENCES topics(id),
+  assignment_method TEXT NOT NULL CHECK (assignment_method IN ('source','rule','model','human')),
+  confidence REAL NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  model_profile TEXT,
+  prompt_version TEXT,
+  explanation TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(work_id, topic_id, assignment_method)
+);
+
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY,
+  work_version_id TEXT NOT NULL REFERENCES work_versions(id) ON DELETE CASCADE,
+  document_role TEXT NOT NULL CHECK (document_role IN ('paper_pdf','paper_html','source','supplement','model_card','readme','other')),
+  source_url TEXT NOT NULL,
+  local_path TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
+  sha256 TEXT NOT NULL,
+  parser_name TEXT,
+  parser_version TEXT,
+  parse_status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (parse_status IN ('pending','parsed','partial','failed','quarantined')),
+  page_count INTEGER,
+  acquired_at TEXT NOT NULL,
+  parsed_at TEXT,
+  UNIQUE(work_version_id, document_role, sha256)
+);
+
+CREATE TABLE IF NOT EXISTS evidence_spans (
+  id TEXT PRIMARY KEY,
+  document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  section_path TEXT,
+  page_start INTEGER,
+  page_end INTEGER,
+  char_start INTEGER,
+  char_end INTEGER,
+  span_text TEXT NOT NULL,
+  normalized_text_sha256 TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_document_page
+  ON evidence_spans(document_id, page_start);
+
+CREATE TABLE IF NOT EXISTS ranking_profiles (
+  id TEXT PRIMARY KEY,
+  profile_key TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  weights_json TEXT NOT NULL,
+  normalization_json TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0,1)),
+  created_at TEXT NOT NULL,
+  UNIQUE(profile_key, version)
+);
+
+CREATE TABLE IF NOT EXISTS ranking_results (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  profile_id TEXT NOT NULL REFERENCES ranking_profiles(id),
+  score_kind TEXT NOT NULL CHECK (score_kind IN ('technical','commercial','deep_dive_priority')),
+  total_score REAL NOT NULL CHECK (total_score >= 0 AND total_score <= 100),
+  components_json TEXT NOT NULL,
+  feature_snapshot_json TEXT NOT NULL,
+  calculated_at TEXT NOT NULL,
+  UNIQUE(work_id, profile_id, score_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ranking_profile_score
+  ON ranking_results(profile_id, score_kind, total_score DESC);
+
+CREATE TABLE IF NOT EXISTS model_profiles (
+  id TEXT PRIMARY KEY,
+  profile_key TEXT NOT NULL UNIQUE,
+  runtime TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  quantization TEXT,
+  context_limit INTEGER NOT NULL,
+  generation_config_json TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  id TEXT PRIMARY KEY,
+  prompt_key TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  template_sha256 TEXT NOT NULL,
+  schema_version TEXT NOT NULL,
+  template_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(prompt_key, version)
+);
+
+CREATE TABLE IF NOT EXISTS analysis_runs (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  work_version_id TEXT NOT NULL REFERENCES work_versions(id),
+  analysis_type TEXT NOT NULL CHECK (analysis_type IN ('fast_brief','deep_dive','skeptic_review','business_analysis','code_analysis')),
+  status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','rejected')),
+  model_profile_id TEXT REFERENCES model_profiles(id),
+  prompt_version_id TEXT REFERENCES prompt_versions(id),
+  input_fingerprint TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  duration_ms INTEGER,
+  error_code TEXT,
+  error_detail TEXT,
+  output_json TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(analysis_type, input_fingerprint, model_profile_id, prompt_version_id)
+);
+
+CREATE TABLE IF NOT EXISTS analysis_sections (
+  id TEXT PRIMARY KEY,
+  analysis_run_id TEXT NOT NULL REFERENCES analysis_runs(id) ON DELETE CASCADE,
+  section_key TEXT NOT NULL,
+  section_order INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('draft','reviewed','verified','rejected')),
+  content_markdown TEXT NOT NULL,
+  structured_json TEXT NOT NULL,
+  confidence REAL CHECK (confidence >= 0 AND confidence <= 1),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(analysis_run_id, section_key)
+);
+
+CREATE TABLE IF NOT EXISTS claims (
+  id TEXT PRIMARY KEY,
+  analysis_section_id TEXT NOT NULL REFERENCES analysis_sections(id) ON DELETE CASCADE,
+  claim_text TEXT NOT NULL,
+  claim_type TEXT NOT NULL CHECK (claim_type IN ('fact','interpretation','recommendation','hypothesis')),
+  importance TEXT NOT NULL CHECK (importance IN ('minor','major','critical')),
+  verification_status TEXT NOT NULL CHECK (verification_status IN ('unsupported','supported','conflicted','rejected')),
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS claim_evidence (
+  claim_id TEXT NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  evidence_span_id TEXT NOT NULL REFERENCES evidence_spans(id),
+  relation TEXT NOT NULL CHECK (relation IN ('supports','contradicts','qualifies','background')),
+  relevance REAL NOT NULL CHECK (relevance >= 0 AND relevance <= 1),
+  PRIMARY KEY(claim_id, evidence_span_id, relation)
+);
+
+CREATE TABLE IF NOT EXISTS repository_links (
+  id TEXT PRIMARY KEY,
+  work_id TEXT NOT NULL REFERENCES works(id) ON DELETE CASCADE,
+  repository_url TEXT NOT NULL,
+  host TEXT NOT NULL DEFAULT 'github',
+  relationship TEXT NOT NULL CHECK (relationship IN ('official','author_linked','community','unknown')),
+  license_spdx TEXT,
+  archived INTEGER CHECK (archived IN (0,1)),
+  default_branch TEXT,
+  latest_commit_at TEXT,
+  latest_release_at TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  checked_at TEXT NOT NULL,
+  UNIQUE(work_id, repository_url)
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id TEXT PRIMARY KEY,
+  run_type TEXT NOT NULL CHECK (run_type IN ('discover','normalize','rank','brief','deep_dive','daily','cleanup')),
+  trigger_type TEXT NOT NULL CHECK (trigger_type IN ('manual','schedule','retry')),
+  status TEXT NOT NULL CHECK (status IN ('queued','running','succeeded','failed','cancelled','deferred')),
+  config_snapshot_json TEXT NOT NULL,
+  queued_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  error_summary TEXT
+);
+
+CREATE TABLE IF NOT EXISTS job_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pipeline_run_id TEXT NOT NULL REFERENCES pipeline_runs(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL,
+  severity TEXT NOT NULL CHECK (severity IN ('debug','info','warning','error','critical')),
+  message TEXT NOT NULL,
+  context_json TEXT NOT NULL DEFAULT '{}',
+  occurred_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_events_run_time
+  ON job_events(pipeline_run_id, occurred_at);
+
+CREATE TABLE IF NOT EXISTS user_feedback (
+  id TEXT PRIMARY KEY,
+  work_id TEXT REFERENCES works(id) ON DELETE SET NULL,
+  analysis_run_id TEXT REFERENCES analysis_runs(id) ON DELETE SET NULL,
+  feedback_type TEXT NOT NULL CHECK (feedback_type IN ('useful','irrelevant','too_shallow','incorrect','follow_topic','mute_topic','note')),
+  value_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS embeddings (
+  id TEXT PRIMARY KEY,
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('work','evidence','analysis_section')),
+  entity_id TEXT NOT NULL,
+  model_name TEXT NOT NULL,
+  dimensions INTEGER NOT NULL,
+  content_sha256 TEXT NOT NULL,
+  vector_store_key TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(entity_type, entity_id, model_name, content_sha256)
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+  entity_type UNINDEXED,
+  entity_id UNINDEXED,
+  title,
+  body,
+  topics,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
