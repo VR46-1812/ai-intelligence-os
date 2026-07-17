@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 
-type ApiHealthState = "loading" | "healthy" | "unavailable";
-
-interface HealthResponse {
-  service: string;
-  status: "ok";
-}
+import {
+  INITIAL_API_HEALTH_STATE,
+  resolveApiHealthState,
+  type ApiHealthState,
+} from "./apiHealth";
 
 const navigationItems = ["Today", "Explore", "Topics", "Opportunities", "System"] as const;
 
@@ -24,17 +23,8 @@ const healthCopy: Record<ApiHealthState, { label: string; detail: string }> = {
   },
 };
 
-function isHealthResponse(value: unknown): value is HealthResponse {
-  if (typeof value !== "object" || value === null) {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return candidate.service === "ai-intelligence-os" && candidate.status === "ok";
-}
-
 function App() {
-  const [healthState, setHealthState] = useState<ApiHealthState>("loading");
+  const [healthState, setHealthState] = useState<ApiHealthState>(INITIAL_API_HEALTH_STATE);
   const formattedDate = new Intl.DateTimeFormat("en", {
     weekday: "long",
     month: "short",
@@ -46,24 +36,13 @@ function App() {
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
     async function checkHealth(): Promise<void> {
-      try {
-        const response = await fetch(`${apiBaseUrl}/health`, {
-          headers: { Accept: "application/json" },
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          setHealthState("unavailable");
-          return;
-        }
-
-        const payload: unknown = await response.json();
-        setHealthState(isHealthResponse(payload) ? "healthy" : "unavailable");
-      } catch (error: unknown) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        setHealthState("unavailable");
+      const nextState = await resolveApiHealthState(
+        fetch,
+        `${apiBaseUrl}/health`,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) {
+        setHealthState(nextState);
       }
     }
 

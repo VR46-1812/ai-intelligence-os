@@ -22,6 +22,8 @@ frontend/node_modules/
 dist/
 frontend/dist/
 coverage/
+playwright-report/
+test-results/
 *.tsbuildinfo
 
 # Project-local tool caches

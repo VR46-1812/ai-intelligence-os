@@ -22,11 +22,21 @@ From the repository root:
 .\scripts\check.ps1
 ```
 
+This single quality command synchronizes frozen dependencies, then runs Pytest,
+Ruff lint/format, Pyright, Vitest, ESLint, the production frontend build,
+Playwright configuration discovery, and the bounded local runtime smoke check.
+Playwright browser binaries are intentionally not downloaded by this command.
+
 Run a bounded local startup smoke test with:
 
 ```powershell
 .\scripts\smoke.ps1
 ```
+
+The configured Playwright smoke test can be run separately from `frontend/`
+with `npm run test:e2e` after a developer explicitly installs a Chromium binary.
+M0.3 validates the configuration with `npm run test:e2e:list` and does not
+download or launch a Playwright browser.
 
 ## Start locally
 
