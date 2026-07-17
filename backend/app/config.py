@@ -103,6 +103,16 @@ class DownloadSettings(BaseModel):
     checksum_algorithm: Literal["sha256"] = "sha256"
 
 
+class DatabaseSettings(BaseModel):
+    """Hard SQLite connection policy for the local persistence layer."""
+
+    model_config = ConfigDict(frozen=True)
+
+    journal_mode: Literal["WAL"] = "WAL"
+    foreign_keys: Literal[True] = True
+    busy_timeout_ms: int = Field(default=5000, ge=1000, le=30_000)
+
+
 class HttpSettings(BaseModel):
     """Shared bounded HTTP policy for later source adapters."""
 
@@ -291,6 +301,7 @@ class AppSettings(BaseSettings):
     )
 
     paths: PathSettings = Field(default_factory=PathSettings)
+    database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     downloads: DownloadSettings = Field(default_factory=DownloadSettings)
     http: HttpSettings = Field(default_factory=HttpSettings)
     sources: SourceSettings = Field(default_factory=SourceSettings)

@@ -74,9 +74,38 @@ default. The project root is fixed, and traversal or absolute paths outside the
 repository/data boundaries are rejected before directory creation. Application
 startup explicitly and idempotently creates only these directories:
 
-- Database parent directory (the database file is not created in M0.2).
+- Database parent directory.
 - Raw and processed document directories.
 - Quarantine and temporary directories.
+
+## SQLite persistence
+
+Application startup opens the configured SQLite file and applies pending
+numbered migrations from `backend/app/db/migrations`. Every connection enables
+WAL journal mode, foreign-key enforcement, and a bounded busy timeout. Applied
+migration names and SHA-256 checksums are recorded in `schema_migrations`; an
+edited or missing applied migration stops startup rather than silently drifting.
+
+The initial `0001_initial.sql` migration mirrors `contracts/schema.sql`,
+including the FTS5 search table. Domain repositories and data ingestion are not
+part of M1.1.
+
+Create a consistent online backup from the repository root after the database
+has been initialized:
+
+```powershell
+.\scripts\backup-database.ps1
+```
+
+The default destination is a timestamped `.db` file under `data/backups`. A
+custom destination must remain inside the configured data root:
+
+```powershell
+.\scripts\backup-database.ps1 --destination backups\manual.db
+```
+
+The backup command uses SQLite's online backup API, verifies integrity, writes
+through a temporary file, and atomically renames the completed backup.
 
 Credentials such as `AIOS_SOURCES__GITHUB_TOKEN` are optional, environment-only
 `SecretStr` values. Their representation is redacted; do not place credentials

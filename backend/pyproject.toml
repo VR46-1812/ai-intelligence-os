@@ -23,6 +23,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+artifacts = ["app/db/migrations/*.sql"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"

@@ -114,6 +114,37 @@ def test_daily_deep_dives_cannot_exceed_fast_briefs(
         load_settings()
 
 
+def test_database_settings_enforce_sqlite_defaults() -> None:
+    """SQLite defaults require WAL, foreign keys, and bounded lock waiting."""
+    settings = load_settings()
+
+    assert settings.database.journal_mode == "WAL"
+    assert settings.database.foreign_keys is True
+    assert settings.database.busy_timeout_ms == 5000
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "invalid_value", "expected_field"),
+    [
+        ("AIOS_DATABASE__JOURNAL_MODE", "DELETE", "journal_mode"),
+        ("AIOS_DATABASE__FOREIGN_KEYS", "false", "foreign_keys"),
+        ("AIOS_DATABASE__BUSY_TIMEOUT_MS", "999", "busy_timeout_ms"),
+        ("AIOS_DATABASE__BUSY_TIMEOUT_MS", "30001", "busy_timeout_ms"),
+    ],
+)
+def test_database_settings_cannot_weaken_sqlite_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    invalid_value: str,
+    expected_field: str,
+) -> None:
+    """Environment overrides cannot disable mandatory SQLite safeguards."""
+    monkeypatch.setenv(environment_name, invalid_value)
+
+    with pytest.raises(ConfigurationError, match=expected_field):
+        load_settings()
+
+
 @pytest.mark.parametrize(
     ("environment_name", "invalid_value", "expected_field"),
     [

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
 from app.config import AppSettings, initialize_directories, load_settings
+from app.db import MigrationRunner, SQLiteDatabase
 
 
 class HealthStatus(StrEnum):
@@ -37,6 +38,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         initialize_directories(resolved_settings.paths)
+        database = SQLiteDatabase(
+            resolved_settings.paths.database_path,
+            resolved_settings.database.busy_timeout_ms,
+        )
+        MigrationRunner(database).migrate()
         yield
 
     application = FastAPI(
