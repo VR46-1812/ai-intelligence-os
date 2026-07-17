@@ -49,6 +49,71 @@ def test_default_settings_encode_hard_resource_policy() -> None:
     assert settings.models.analyst.keep_alive_seconds == 0
 
 
+def test_daily_work_limits_have_bounded_defaults() -> None:
+    """Daily defaults limit broad briefs and expensive automatic analysis."""
+    settings = load_settings()
+
+    assert settings.daily_work.maximum_fast_briefs == 10
+    assert settings.daily_work.maximum_automatic_deep_dives == 2
+
+
+def test_daily_work_limits_accept_valid_environment_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Operators can lower or adjust daily limits within the approved bounds."""
+    monkeypatch.setenv("AIOS_DAILY_WORK__MAXIMUM_FAST_BRIEFS", "12")
+    monkeypatch.setenv("AIOS_DAILY_WORK__MAXIMUM_AUTOMATIC_DEEP_DIVES", "3")
+
+    settings = load_settings()
+
+    assert settings.daily_work.maximum_fast_briefs == 12
+    assert settings.daily_work.maximum_automatic_deep_dives == 3
+
+
+@pytest.mark.parametrize(
+    ("environment_name", "invalid_value", "expected_field"),
+    [
+        ("AIOS_DAILY_WORK__MAXIMUM_FAST_BRIEFS", "0", "maximum_fast_briefs"),
+        ("AIOS_DAILY_WORK__MAXIMUM_FAST_BRIEFS", "26", "maximum_fast_briefs"),
+        (
+            "AIOS_DAILY_WORK__MAXIMUM_AUTOMATIC_DEEP_DIVES",
+            "0",
+            "maximum_automatic_deep_dives",
+        ),
+        (
+            "AIOS_DAILY_WORK__MAXIMUM_AUTOMATIC_DEEP_DIVES",
+            "4",
+            "maximum_automatic_deep_dives",
+        ),
+    ],
+)
+def test_daily_work_limits_reject_values_outside_bounds(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_name: str,
+    invalid_value: str,
+    expected_field: str,
+) -> None:
+    """Daily generation counts cannot exceed or fall below approved bounds."""
+    monkeypatch.setenv(environment_name, invalid_value)
+
+    with pytest.raises(ConfigurationError, match=expected_field):
+        load_settings()
+
+
+def test_daily_deep_dives_cannot_exceed_fast_briefs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The expensive stage cannot contain more items than its shortlist."""
+    monkeypatch.setenv("AIOS_DAILY_WORK__MAXIMUM_FAST_BRIEFS", "1")
+    monkeypatch.setenv("AIOS_DAILY_WORK__MAXIMUM_AUTOMATIC_DEEP_DIVES", "2")
+
+    with pytest.raises(
+        ConfigurationError,
+        match="maximum_automatic_deep_dives cannot exceed maximum_fast_briefs",
+    ):
+        load_settings()
+
+
 @pytest.mark.parametrize(
     ("environment_name", "invalid_value", "expected_field"),
     [

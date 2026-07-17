@@ -229,6 +229,23 @@ class RetentionSettings(BaseModel):
     maximum_storage_gib: int = Field(default=100, ge=10, le=300)
 
 
+class DailyWorkLimitSettings(BaseModel):
+    """Daily generation-count ceilings for later orchestration work."""
+
+    model_config = ConfigDict(frozen=True)
+
+    maximum_fast_briefs: int = Field(default=10, ge=1, le=25)
+    maximum_automatic_deep_dives: int = Field(default=2, ge=1, le=3)
+
+    @model_validator(mode="after")
+    def validate_daily_funnel(self) -> Self:
+        """Keep expensive deep dives bounded by the fast-brief shortlist."""
+        if self.maximum_automatic_deep_dives > self.maximum_fast_briefs:
+            msg = "maximum_automatic_deep_dives cannot exceed maximum_fast_briefs"
+            raise ValueError(msg)
+        return self
+
+
 class ResourceBudgetSettings(BaseModel):
     """Hard laptop resource ceilings for all later runtime work."""
 
@@ -281,6 +298,7 @@ class AppSettings(BaseSettings):
     token_limits: TokenLimitSettings = Field(default_factory=TokenLimitSettings)
     models: ModelProfileSettings = Field(default_factory=ModelProfileSettings)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
+    daily_work: DailyWorkLimitSettings = Field(default_factory=DailyWorkLimitSettings)
     resources: ResourceBudgetSettings = Field(default_factory=ResourceBudgetSettings)
 
     @model_validator(mode="after")
