@@ -1,0 +1,45 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.venv/
+venv/
+backend/.venv/
+
+# JavaScript
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+coverage/
+*.tsbuildinfo
+
+# Project-local tool caches
+.cache/
+
+# Local application data and model artifacts
+data/**
+!data/.gitkeep
+models/
+*.gguf
+*.safetensors
+
+# Logs and runtime files
+*.log
+*.pid
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
