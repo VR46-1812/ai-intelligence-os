@@ -1,9 +1,13 @@
 """FastAPI application entry point for the M0.1 scaffold."""
 
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from enum import StrEnum
 
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
+
+from app.config import AppSettings, initialize_directories, load_settings
 
 
 class HealthStatus(StrEnum):
@@ -26,12 +30,20 @@ async def health() -> HealthResponse:
     return HealthResponse(service="ai-intelligence-os", status=HealthStatus.OK)
 
 
-def create_app() -> FastAPI:
-    """Create the API application without starting external services."""
+def create_app(settings: AppSettings | None = None) -> FastAPI:
+    """Create the API application and validate its local configuration."""
+    resolved_settings = settings if settings is not None else load_settings()
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
+        initialize_directories(resolved_settings.paths)
+        yield
+
     application = FastAPI(
         title="AI Intelligence OS API",
         description="Local-first AI research intelligence API.",
         version="0.1.0",
+        lifespan=lifespan,
     )
 
     application.add_api_route(
