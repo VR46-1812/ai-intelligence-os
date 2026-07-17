@@ -87,8 +87,13 @@ migration names and SHA-256 checksums are recorded in `schema_migrations`; an
 edited or missing applied migration stops startup rather than silently drifting.
 
 The initial `0001_initial.sql` migration mirrors `contracts/schema.sql`,
-including the FTS5 search table. Domain repositories and data ingestion are not
-part of M1.1.
+including the FTS5 search table. M1.2 adds framework-independent Pydantic domain
+models and typed SQLite repository boundaries for sources, raw source records,
+works, versions, documents, rankings, analyses, and pipeline runs. Repository
+writes require a caller-owned explicit transaction from `app.db.connection`;
+this allows one unit of work to update several repositories and roll back as a
+whole. List methods use validated, bounded offset pagination and typed filters.
+No ingestion, connector, scheduling, or analysis execution is included.
 
 Create a consistent online backup from the repository root after the database
 has been initialized:
