@@ -220,6 +220,14 @@ class SQLiteSourceRepository(_SQLiteRepository):
         )
         return None if row is None else self._from_row(row)
 
+    def get_by_key(self, source_key: str) -> Source | None:
+        row = self._fetchone(
+            f"SELECT {self._columns} FROM sources WHERE source_key = ?",
+            (source_key,),
+            "get source by key",
+        )
+        return None if row is None else self._from_row(row)
+
     def update(self, source: Source) -> Source:
         params = self._params(source)
         self._execute_write(

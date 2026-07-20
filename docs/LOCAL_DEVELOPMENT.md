@@ -109,6 +109,30 @@ mappings and bounded per-topic user weights; unmapped categories resolve to the
 explicit `unknown` topic. No classification model or connector runs in this
 slice.
 
+## Connector framework
+
+M2.1 provides typed connector/page contracts, persisted source-registry
+loading, a bounded asynchronous HTTP transport, and a transactional ingestion
+runner. HTTP calls use the configured connect/read timeouts, at most three
+total attempts, exponential jittered backoff, connector request spacing, the existing
+response-size ceiling, and the configured maximum of three concurrent source
+downloads. Redirects are not followed automatically.
+
+Each raw response is durably written beneath the configured raw data root with
+a SHA-256 name and immutable provenance sidecar before its `source_records` row
+is committed. A page cursor advances in the same SQLite transaction as all rows
+from that page. Failed later pages retain the previous durable checkpoint.
+
+Run the bounded offline demonstration from `backend/`:
+
+```powershell
+uv run python -m app.ingestion.demo --records 5
+```
+
+This stores at most five generated fixture records in the configured local data
+root and database. It makes no network request. Live arXiv retrieval remains
+M2.2 scope.
+
 Create a consistent online backup from the repository root after the database
 has been initialized:
 
