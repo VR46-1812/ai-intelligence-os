@@ -195,7 +195,7 @@ class RankingProfile(DomainModel):
     version: Annotated[int, Field(gt=0)]
     weights: JsonObject
     normalization: JsonObject
-    active: bool = True
+    active: bool = False
     created_at: UtcDateTime
 
 

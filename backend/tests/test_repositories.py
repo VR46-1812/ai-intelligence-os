@@ -203,8 +203,11 @@ def test_domain_models_reject_invalid_values() -> None:
         _source().model_copy(update={"created_at": datetime(2026, 7, 17)}).model_validate(
             _source().model_copy(update={"created_at": datetime(2026, 7, 17)}).model_dump()
         )
-    with pytest.raises(ValidationError):
-        PageRequest(limit=101)
+    for invalid_page in ({"limit": 0}, {"limit": 101}, {"offset": -1}):
+        with pytest.raises(ValidationError):
+            PageRequest.model_validate(invalid_page)
+    assert PageRequest(limit=1).limit == 1
+    assert PageRequest(limit=100).limit == 100
     with pytest.raises(ValidationError):
         RankingResult(
             id="rank-invalid",
@@ -289,6 +292,7 @@ def test_works_versions_and_documents_round_trip_update_deduplicate_and_filter(
 
     assert repos.works.get("work-1") == _work()
     assert repos.work_versions.get("version-1") == _version()
+    assert repos.documents.get(document.id) == document
     assert created_document.created and not duplicate_document.created
     assert duplicate_document.entity.id == document.id
 
