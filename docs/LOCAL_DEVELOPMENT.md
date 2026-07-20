@@ -95,6 +95,13 @@ this allows one unit of work to update several repositories and roll back as a
 whole. List methods use validated, bounded offset pagination and typed filters.
 No ingestion, connector, scheduling, or analysis execution is included.
 
+M1.3 adds the deterministic catalog identity service. It normalizes DOI, arXiv,
+and OpenReview identifiers, auto-links only exact external identities, creates
+new versions under stable works, and returns explicit manual-review candidates
+for conservative title/first-author/year matches or conflicting identifiers.
+Catalog writes share the caller's explicit SQLite transaction; connector
+fetching and a persistent review queue remain outside this slice.
+
 Create a consistent online backup from the repository root after the database
 has been initialized:
 

@@ -9,6 +9,7 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from enum import Enum
 from typing import cast
 
@@ -17,8 +18,11 @@ from pydantic import BaseModel, ValidationError
 from app.domain.models import (
     AnalysisRun,
     AnalysisRunFilter,
+    Author,
     Document,
     DocumentFilter,
+    ExternalIdentifier,
+    ExternalIdType,
     PageRequest,
     PipelineRun,
     PipelineRunFilter,
@@ -31,6 +35,7 @@ from app.domain.models import (
     SourceRecord,
     SourceRecordFilter,
     Work,
+    WorkAuthor,
     WorkFilter,
     WorkVersion,
     WorkVersionFilter,
@@ -422,6 +427,136 @@ class SQLiteWorkRepository(_SQLiteRepository):
             "list works",
         )
         return tuple(self._from_row(row) for row in rows)
+
+
+class SQLiteCatalogIdentityRepository(_SQLiteRepository):
+    _external_id_columns = (
+        "id, work_id, id_type, normalized_value, raw_value, source_record_id, created_at"
+    )
+
+    @staticmethod
+    def _external_id_from_row(row: sqlite3.Row) -> ExternalIdentifier:
+        return _model(
+            ExternalIdentifier,
+            {
+                "id": row["id"],
+                "work_id": row["work_id"],
+                "id_type": row["id_type"],
+                "normalized_value": row["normalized_value"],
+                "raw_value": row["raw_value"],
+                "source_record_id": row["source_record_id"],
+                "created_at": row["created_at"],
+            },
+        )
+
+    def create_external_id_or_get(
+        self, identifier: ExternalIdentifier
+    ) -> CreateResult[ExternalIdentifier]:
+        self._require_transaction()
+        existing = self.get_external_id(identifier.id_type, identifier.normalized_value)
+        if existing is not None:
+            return CreateResult(existing, False)
+        self._execute_write(
+            f"INSERT INTO external_ids ({self._external_id_columns}) VALUES (?,?,?,?,?,?,?)",
+            (
+                identifier.id,
+                identifier.work_id,
+                identifier.id_type.value,
+                identifier.normalized_value,
+                identifier.raw_value,
+                identifier.source_record_id,
+                _datetime(identifier.created_at),
+            ),
+            "create external identifier",
+        )
+        return CreateResult(identifier, True)
+
+    def get_external_id(
+        self, id_type: ExternalIdType, normalized_value: str
+    ) -> ExternalIdentifier | None:
+        row = self._fetchone(
+            f"SELECT {self._external_id_columns} FROM external_ids "
+            "WHERE id_type=? AND normalized_value=?",
+            (id_type.value, normalized_value),
+            "get external identifier",
+        )
+        return None if row is None else self._external_id_from_row(row)
+
+    def list_external_ids(self, work_id: str) -> tuple[ExternalIdentifier, ...]:
+        rows = self._fetchall(
+            f"SELECT {self._external_id_columns} FROM external_ids "
+            "WHERE work_id=? ORDER BY id_type, normalized_value, id",
+            [work_id],
+            "list external identifiers",
+        )
+        return tuple(self._external_id_from_row(row) for row in rows)
+
+    def create_author(self, author: Author) -> Author:
+        self._execute_write(
+            """INSERT INTO authors(
+                id, normalized_name, display_name, orcid, affiliation_text, created_at, updated_at
+            ) VALUES (?,?,?,?,?,?,?)""",
+            (
+                author.id,
+                author.normalized_name,
+                author.display_name,
+                author.orcid,
+                author.affiliation_text,
+                _datetime(author.created_at),
+                _datetime(author.updated_at),
+            ),
+            "create author",
+        )
+        return author
+
+    def create_work_author(self, work_author: WorkAuthor) -> WorkAuthor:
+        self._execute_write(
+            """INSERT INTO work_authors(
+                work_id, author_id, author_order, is_corresponding
+            ) VALUES (?,?,?,?)""",
+            (
+                work_author.work_id,
+                work_author.author_id,
+                work_author.author_order,
+                int(work_author.is_corresponding),
+            ),
+            "create work author",
+        )
+        return work_author
+
+    def find_candidate_work_ids(
+        self,
+        *,
+        normalized_title: str,
+        normalized_first_author: str,
+        publication_year: int,
+        fuzzy_title_threshold: float,
+    ) -> tuple[str, ...]:
+        try:
+            rows = self._connection.execute(
+                """SELECT w.id, w.normalized_title
+                FROM works AS w
+                JOIN work_authors AS wa ON wa.work_id = w.id AND wa.author_order = 1
+                JOIN authors AS a ON a.id = wa.author_id
+                WHERE a.normalized_name = ?
+                  AND CAST(substr(w.first_published_at, 1, 4) AS INTEGER) = ?
+                ORDER BY w.id""",
+                (normalized_first_author, publication_year),
+            ).fetchall()
+        except sqlite3.Error as error:
+            raise RepositoryError(f"find identity candidates: {error}") from error
+
+        return tuple(
+            str(row["id"])
+            for row in rows
+            if SequenceMatcher(
+                None,
+                normalized_title,
+                str(row["normalized_title"]),
+                autojunk=False,
+            ).ratio()
+            >= fuzzy_title_threshold
+        )
 
 
 class SQLiteWorkVersionRepository(_SQLiteRepository):
@@ -970,6 +1105,7 @@ class SQLiteRepositories:
     sources: SQLiteSourceRepository
     source_records: SQLiteSourceRecordRepository
     works: SQLiteWorkRepository
+    catalog_identities: SQLiteCatalogIdentityRepository
     work_versions: SQLiteWorkVersionRepository
     documents: SQLiteDocumentRepository
     rankings: SQLiteRankingRepository
@@ -982,6 +1118,7 @@ class SQLiteRepositories:
             sources=SQLiteSourceRepository(connection),
             source_records=SQLiteSourceRecordRepository(connection),
             works=SQLiteWorkRepository(connection),
+            catalog_identities=SQLiteCatalogIdentityRepository(connection),
             work_versions=SQLiteWorkVersionRepository(connection),
             documents=SQLiteDocumentRepository(connection),
             rankings=SQLiteRankingRepository(connection),

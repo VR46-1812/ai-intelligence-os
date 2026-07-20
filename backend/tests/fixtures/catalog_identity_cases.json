@@ -1,0 +1,26 @@
+[
+  {
+    "id_type": "doi",
+    "raw_value": "https://doi.org/10.48550/ARXIV.2401.12345",
+    "normalized_value": "10.48550/arxiv.2401.12345",
+    "version_label": null
+  },
+  {
+    "id_type": "arxiv",
+    "raw_value": "https://arxiv.org/pdf/2401.12345v2.pdf",
+    "normalized_value": "2401.12345",
+    "version_label": "v2"
+  },
+  {
+    "id_type": "arxiv",
+    "raw_value": "arXiv:hep-th/9901001v3",
+    "normalized_value": "hep-th/9901001",
+    "version_label": "v3"
+  },
+  {
+    "id_type": "openreview",
+    "raw_value": "https://openreview.net/forum?id=AbC_123-xY",
+    "normalized_value": "AbC_123-xY",
+    "version_label": null
+  }
+]

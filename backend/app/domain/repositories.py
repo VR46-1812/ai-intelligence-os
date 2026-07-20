@@ -8,8 +8,11 @@ from typing import Protocol
 from app.domain.models import (
     AnalysisRun,
     AnalysisRunFilter,
+    Author,
     Document,
     DocumentFilter,
+    ExternalIdentifier,
+    ExternalIdType,
     PageRequest,
     PipelineRun,
     PipelineRunFilter,
@@ -22,6 +25,7 @@ from app.domain.models import (
     SourceRecord,
     SourceRecordFilter,
     Work,
+    WorkAuthor,
     WorkFilter,
     WorkVersion,
     WorkVersionFilter,
@@ -76,6 +80,26 @@ class WorkVersionRepository(Protocol):
     def list(
         self, page: PageRequest, filters: WorkVersionFilter = _WORK_VERSION_FILTER
     ) -> tuple[WorkVersion, ...]: ...
+
+
+class CatalogIdentityRepository(Protocol):
+    def create_external_id_or_get(
+        self, identifier: ExternalIdentifier
+    ) -> CreateResult[ExternalIdentifier]: ...
+    def get_external_id(
+        self, id_type: ExternalIdType, normalized_value: str
+    ) -> ExternalIdentifier | None: ...
+    def list_external_ids(self, work_id: str) -> tuple[ExternalIdentifier, ...]: ...
+    def create_author(self, author: Author) -> Author: ...
+    def create_work_author(self, work_author: WorkAuthor) -> WorkAuthor: ...
+    def find_candidate_work_ids(
+        self,
+        *,
+        normalized_title: str,
+        normalized_first_author: str,
+        publication_year: int,
+        fuzzy_title_threshold: float,
+    ) -> tuple[str, ...]: ...
 
 
 class DocumentRepository(Protocol):

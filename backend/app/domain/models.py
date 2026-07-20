@@ -134,6 +134,43 @@ class Work(DomainModel):
     updated_at: UtcDateTime
 
 
+class ExternalIdType(StrEnum):
+    DOI = "doi"
+    ARXIV = "arxiv"
+    OPENREVIEW = "openreview"
+    GITHUB = "github"
+    HUGGINGFACE = "huggingface"
+    URL = "url"
+    OTHER = "other"
+
+
+class ExternalIdentifier(DomainModel):
+    id: Identifier
+    work_id: Identifier
+    id_type: ExternalIdType
+    normalized_value: NonEmptyText
+    raw_value: NonEmptyText
+    source_record_id: str | None = None
+    created_at: UtcDateTime
+
+
+class Author(DomainModel):
+    id: Identifier
+    normalized_name: NonEmptyText
+    display_name: NonEmptyText
+    orcid: str | None = None
+    affiliation_text: str | None = None
+    created_at: UtcDateTime
+    updated_at: UtcDateTime
+
+
+class WorkAuthor(DomainModel):
+    work_id: Identifier
+    author_id: Identifier
+    author_order: Annotated[int, Field(ge=1)]
+    is_corresponding: bool = False
+
+
 class WorkVersion(DomainModel):
     id: Identifier
     work_id: Identifier
