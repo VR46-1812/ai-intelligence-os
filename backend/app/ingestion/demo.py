@@ -27,7 +27,19 @@ from app.ingestion.runner import IngestionRunner
 from app.ingestion.storage import RawPayloadStore
 from app.repositories import SQLiteRepositories
 from app.sources.arxiv import ARXIV_MINIMUM_REQUEST_INTERVAL_MS, ArxivConnector
-from app.sources.arxiv_ingestion import ArxivIngestionService
+from app.sources.arxiv_ingestion import ArxivIngestionService, ArxivSyncResult
+
+
+class LiveDemoError(RuntimeError):
+    """Raised when an explicit live demo does not retrieve a useful first page."""
+
+
+def ensure_useful_live_result(result: ArxivSyncResult) -> None:
+    if result.ingestion.records_seen == 0 or not result.fetched_entries:
+        raise LiveDemoError(
+            "the official arXiv API returned no usable entries on the first bounded page; "
+            "no successful live demonstration was produced"
+        )
 
 
 class OfflineFixtureConnector:
@@ -250,10 +262,11 @@ async def _run_live(
     )
     try:
         result = await service.sync(
-            since=now - timedelta(hours=settings.sources.metadata_overlap_hours),
+            since=now - timedelta(days=7),
             until=now,
             page_size=count,
         )
+        ensure_useful_live_result(result)
         print(result.model_dump_json(indent=2))
     finally:
         await http.aclose()
@@ -268,7 +281,10 @@ def main(arguments: Sequence[str] | None = None) -> None:
         help="fetch and store at most five real records from the official arXiv API",
     )
     options = parser.parse_args(arguments)
-    asyncio.run(_run(options.records, live=options.live))
+    try:
+        asyncio.run(_run(options.records, live=options.live))
+    except LiveDemoError as error:
+        parser.exit(2, f"live arXiv demo failed: {error}\n")
 
 
 if __name__ == "__main__":

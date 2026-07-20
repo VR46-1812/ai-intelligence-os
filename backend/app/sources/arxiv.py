@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
 from app.catalog.identity import (
     CatalogIdentityError,
@@ -54,6 +55,16 @@ class ArxivHttpClient(Protocol):
     ) -> HttpResponse: ...
 
 
+class ArxivFetchedEntry(BaseModel):
+    """Human-verifiable identity from the most recent fetched Atom page(s)."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    arxiv_id: str
+    version: str | None
+    title: str
+
+
 class ArxivConnector:
     key = "arxiv"
     trust_tier = TrustTier.A
@@ -79,8 +90,14 @@ class ArxivConnector:
         self.maximum_pages_per_run = maximum_pages_per_run
         self._http = http
         self._clock = clock
+        self._fetched_entries: list[ArxivFetchedEntry] = []
+
+    @property
+    def fetched_entries(self) -> tuple[ArxivFetchedEntry, ...]:
+        return tuple(self._fetched_entries)
 
     async def fetch(self, window: FetchWindow) -> AsyncIterator[ConnectorPage]:
+        self._fetched_entries.clear()
         start = 0 if window.cursor is None else self._cursor_position(window.cursor, window.until)
         pages = 0
         while True:
@@ -100,10 +117,20 @@ class ArxivConnector:
                 updated_at = self._optional_datetime(entry.findtext(f"{ATOM}updated"))
                 if updated_at is not None and updated_at < window.since:
                     reached_window_start = True
-                    continue
+                    break
                 if updated_at is None or updated_at <= window.until:
-                    records.append(self._raw_record(entry, response, start))
-            next_position = start + len(entries)
+                    raw_record = self._raw_record(entry, response, start)
+                    records.append(raw_record)
+                    title = self._clean(entry.findtext(f"{ATOM}title"))
+                    if not raw_record.upstream_id.startswith("malformed:") and title is not None:
+                        self._fetched_entries.append(
+                            ArxivFetchedEntry(
+                                arxiv_id=raw_record.upstream_id,
+                                version=raw_record.upstream_version,
+                                title=title,
+                            )
+                        )
+            next_position = start + len(records)
             pages += 1
             capped = self.maximum_pages_per_run is not None and pages >= self.maximum_pages_per_run
             exhausted = (

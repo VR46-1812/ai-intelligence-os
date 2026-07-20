@@ -37,7 +37,7 @@ from app.domain.repositories import (
 from app.ingestion.contracts import ConnectorException, NormalizedAuthor, RawSourceRecord
 from app.ingestion.runner import IngestionResult, IngestionRunner
 from app.ingestion.storage import RawPayloadError, RawPayloadStore
-from app.sources.arxiv import ArxivConnector
+from app.sources.arxiv import ArxivConnector, ArxivFetchedEntry
 
 TransactionFactory = Callable[[], AbstractContextManager[object]]
 _VERSION_NUMBER = re.compile(r"^v(?P<number>\d+)$", re.IGNORECASE)
@@ -53,6 +53,7 @@ class ArxivSyncResult(BaseModel):
     revisions_created: int = Field(ge=0)
     already_known: int = Field(ge=0)
     manual_review: int = Field(ge=0)
+    fetched_entries: tuple[ArxivFetchedEntry, ...] = ()
 
 
 class ArxivIngestionService:
@@ -184,6 +185,7 @@ class ArxivIngestionService:
             revisions_created=revisions_created,
             already_known=already_known,
             manual_review=manual_review,
+            fetched_entries=self._connector.fetched_entries,
         )
 
     def _pending_records(self) -> tuple[SourceRecord, ...]:

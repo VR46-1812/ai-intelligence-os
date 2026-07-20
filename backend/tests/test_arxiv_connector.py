@@ -71,6 +71,11 @@ def test_fetch_uses_only_configured_categories_and_resumes_from_checkpoint() -> 
     assert query["search_query"] == ["(cat:cs.AI OR cat:stat.ML)"]
     assert "cs.CL" not in http.calls[0][0]
     assert http.calls[0][1] == ARXIV_MINIMUM_REQUEST_INTERVAL_MS
+    assert [entry.arxiv_id for entry in connector.fetched_entries] == [
+        "2607.01234",
+        "2607.01234",
+        "2607.05678",
+    ]
 
 
 def test_normalize_preserves_identity_revision_authors_dates_categories_and_provenance() -> None:
@@ -121,7 +126,7 @@ def test_malformed_entry_is_captured_and_isolated_during_normalization() -> None
         connector.normalize(malformed)
 
 
-def test_fetch_stops_at_window_boundary_but_preserves_undated_malformed_entry() -> None:
+def test_fetch_stops_at_window_boundary_without_advancing_past_unconsumed_entries() -> None:
     connector = ArxivConnector(
         FixtureHttpClient(((FIXTURES / "older-page.xml").read_bytes(),)),
         ("cs.AI",),
@@ -129,9 +134,8 @@ def test_fetch_stops_at_window_boundary_but_preserves_undated_malformed_entry() 
     page = asyncio.run(_pages(connector, FetchWindow(since=SINCE, until=UNTIL, page_size=2)))[0]
 
     assert page.exhausted is True
-    assert len(page.records) == 1
-    assert page.records[0].upstream_id.startswith("malformed:")
-    assert page.next_cursor is not None and page.next_cursor["position"] == "2"
+    assert page.records == ()
+    assert page.next_cursor is not None and page.next_cursor["position"] == "0"
 
 
 def test_fetch_paginates_and_stale_window_checkpoint_restarts_at_zero() -> None:
@@ -159,6 +163,6 @@ def test_fetch_paginates_and_stale_window_checkpoint_restarts_at_zero() -> None:
 
     assert len(pages) == 2
     assert pages[0].next_cursor is not None and pages[0].next_cursor["position"] == "4"
-    assert pages[1].next_cursor is not None and pages[1].next_cursor["position"] == "6"
+    assert pages[1].next_cursor is not None and pages[1].next_cursor["position"] == "4"
     assert parse_qs(urlparse(http.calls[0][0]).query)["start"] == ["0"]
     assert parse_qs(urlparse(http.calls[1][0]).query)["start"] == ["4"]

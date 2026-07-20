@@ -27,6 +27,7 @@ from app.domain.models import (
     WorkVersionFilter,
 )
 from app.ingestion.contracts import HttpResponse
+from app.ingestion.demo import LiveDemoError, ensure_useful_live_result
 from app.ingestion.registry import SourceRegistry
 from app.ingestion.runner import IngestionRunner
 from app.ingestion.storage import RawPayloadStore
@@ -158,6 +159,8 @@ def test_sync_persists_raw_works_revisions_authors_topics_and_isolates_bad_entri
     assert result.records_rejected == 1
     assert result.works_created == 2
     assert result.revisions_created == 1
+    assert len(result.fetched_entries) == 3
+    ensure_useful_live_result(result)
     works = repositories.works.list(PageRequest(limit=10))
     assert len(works) == 2
     revised = next(work for work in works if work.normalized_title.startswith("reliable local"))
@@ -224,3 +227,15 @@ def test_overlapping_repeat_deduplicates_raw_records_works_and_versions(
         )
         == 3
     )
+
+
+def test_live_demo_rejects_an_empty_technically_successful_page(
+    arxiv_store: tuple[Path, sqlite3.Connection, SQLiteRepositories],
+) -> None:
+    root, connection, repositories = arxiv_store
+    result = asyncio.run(
+        _service(root, connection, repositories).sync(since=NOW, until=NOW, page_size=5)
+    )
+
+    with pytest.raises(LiveDemoError, match="no usable entries"):
+        ensure_useful_live_result(result)
