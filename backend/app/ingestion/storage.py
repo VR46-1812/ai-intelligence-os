@@ -100,6 +100,21 @@ class RawPayloadStore:
             metadata_path=metadata_path.relative_to(self._data_root).as_posix(),
         )
 
+    def load(self, relative_path: str, expected_sha256: str) -> bytes:
+        path = (self._data_root / relative_path).resolve(strict=False)
+        if not path.is_relative_to(self._raw_root):
+            raise RawPayloadError("raw payload path escaped the configured raw root")
+        try:
+            size = path.stat().st_size
+            if size > self._maximum_bytes:
+                raise RawPayloadError("stored raw payload exceeds the configured byte limit")
+            content = path.read_bytes()
+        except OSError as error:
+            raise RawPayloadError("could not read stored raw source response") from error
+        if hashlib.sha256(content).hexdigest() != expected_sha256:
+            raise RawPayloadError("stored raw payload checksum does not match its source record")
+        return content
+
     @staticmethod
     def _write_once(path: Path, content: bytes) -> None:
         if path.exists():

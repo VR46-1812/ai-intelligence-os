@@ -109,7 +109,7 @@ mappings and bounded per-topic user weights; unmapped categories resolve to the
 explicit `unknown` topic. No classification model or connector runs in this
 slice.
 
-## Connector framework
+## Connector framework and arXiv
 
 M2.1 provides typed connector/page contracts, persisted source-registry
 loading, a bounded asynchronous HTTP transport, and a transactional ingestion
@@ -130,8 +130,20 @@ uv run python -m app.ingestion.demo --records 5
 ```
 
 This stores at most five generated fixture records in the configured local data
-root and database. It makes no network request. Live arXiv retrieval remains
-M2.2 scope.
+root and database. It makes no network request and remains the default.
+
+M2.2 adds the official Atom API connector, configured phase-one category
+filtering, checkpointed pagination, and transactional normalization into works,
+versions, authors, identities, and controlled topics. To explicitly permit one
+live page of at most five records, run from `backend/`:
+
+```powershell
+uv run python -m app.ingestion.demo --live --records 5
+```
+
+The live command uses the shared timeout, retry, response-size, concurrency, and
+minimum three-second arXiv request-spacing policies. It does not download paper
+documents or invoke a model.
 
 Create a consistent online backup from the repository root after the database
 has been initialized:

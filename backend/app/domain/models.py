@@ -171,6 +171,24 @@ class WorkAuthor(DomainModel):
     is_corresponding: bool = False
 
 
+class TopicAssignmentMethod(StrEnum):
+    SOURCE = "source"
+    RULE = "rule"
+    MODEL = "model"
+    HUMAN = "human"
+
+
+class WorkTopic(DomainModel):
+    work_id: Identifier
+    topic_id: Identifier
+    assignment_method: TopicAssignmentMethod
+    confidence: Annotated[float, Field(ge=0, le=1)]
+    model_profile: str | None = None
+    prompt_version: str | None = None
+    explanation: str | None = None
+    created_at: UtcDateTime
+
+
 class Topic(DomainModel):
     id: Identifier
     topic_key: Identifier

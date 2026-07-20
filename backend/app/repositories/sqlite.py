@@ -38,6 +38,7 @@ from app.domain.models import (
     Work,
     WorkAuthor,
     WorkFilter,
+    WorkTopic,
     WorkVersion,
     WorkVersionFilter,
 )
@@ -533,6 +534,25 @@ class SQLiteCatalogIdentityRepository(_SQLiteRepository):
         )
         return work_author
 
+    def get_work_author_by_order(self, work_id: str, author_order: int) -> WorkAuthor | None:
+        row = self._fetchone(
+            """SELECT work_id, author_id, author_order, is_corresponding
+            FROM work_authors WHERE work_id=? AND author_order=?""",
+            (work_id, author_order),
+            "get work author by order",
+        )
+        if row is None:
+            return None
+        return _model(
+            WorkAuthor,
+            {
+                "work_id": row["work_id"],
+                "author_id": row["author_id"],
+                "author_order": row["author_order"],
+                "is_corresponding": bool(row["is_corresponding"]),
+            },
+        )
+
     def find_candidate_work_ids(
         self,
         *,
@@ -635,6 +655,55 @@ class SQLiteTopicRepository(_SQLiteRepository):
             "list topics",
         )
         return tuple(self._from_row(row) for row in rows)
+
+    def assign_or_get(self, assignment: WorkTopic) -> CreateResult[WorkTopic]:
+        self._require_transaction()
+        row = self._fetchone(
+            """SELECT work_id, topic_id, assignment_method, confidence, model_profile,
+            prompt_version, explanation, created_at FROM work_topics
+            WHERE work_id=? AND topic_id=? AND assignment_method=?""",
+            (
+                assignment.work_id,
+                assignment.topic_id,
+                assignment.assignment_method.value,
+            ),
+            "deduplicate work topic",
+        )
+        if row is not None:
+            return CreateResult(
+                _model(
+                    WorkTopic,
+                    {
+                        "work_id": row["work_id"],
+                        "topic_id": row["topic_id"],
+                        "assignment_method": row["assignment_method"],
+                        "confidence": row["confidence"],
+                        "model_profile": row["model_profile"],
+                        "prompt_version": row["prompt_version"],
+                        "explanation": row["explanation"],
+                        "created_at": row["created_at"],
+                    },
+                ),
+                False,
+            )
+        self._execute_write(
+            """INSERT INTO work_topics(
+                work_id, topic_id, assignment_method, confidence, model_profile,
+                prompt_version, explanation, created_at
+            ) VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                assignment.work_id,
+                assignment.topic_id,
+                assignment.assignment_method.value,
+                assignment.confidence,
+                assignment.model_profile,
+                assignment.prompt_version,
+                assignment.explanation,
+                _datetime(assignment.created_at),
+            ),
+            "assign work topic",
+        )
+        return CreateResult(assignment, True)
 
 
 class SQLiteWorkVersionRepository(_SQLiteRepository):

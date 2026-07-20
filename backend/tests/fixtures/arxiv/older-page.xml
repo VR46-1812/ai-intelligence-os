@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <opensearch:totalResults>6</opensearch:totalResults>
+  <entry>
+    <id>https://arxiv.org/abs/2606.00001v1</id>
+    <updated>2026-06-01T00:00:00Z</updated>
+    <published>2026-06-01T00:00:00Z</published>
+    <title>Older Record</title>
+    <author><name>Older Author</name></author>
+    <category term="cs.AI"/>
+  </entry>
+  <entry>
+    <summary>Malformed records are retained even when their date is absent.</summary>
+  </entry>
+</feed>

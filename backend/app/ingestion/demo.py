@@ -1,28 +1,33 @@
-"""Offline bounded demonstration of the M2.1 ingestion framework."""
+"""Offline ingestion demo with an explicit bounded live arXiv option."""
 
 from __future__ import annotations
 
 import argparse
 import asyncio
 import json
+import sqlite3
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
-from app.catalog.identity import new_ulid, normalize_title
-from app.config import initialize_directories, load_settings
+from app.catalog.identity import CatalogIdentityService, new_ulid, normalize_title
+from app.catalog.taxonomy import TopicTaxonomyService, load_default_taxonomy
+from app.config import AppSettings, initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase, transaction
-from app.domain.models import PublicationStatus, Source, TrustTier, WorkType
+from app.domain.models import JsonObject, PublicationStatus, Source, TrustTier, WorkType
 from app.ingestion.contracts import (
     ConnectorPage,
     FetchWindow,
     NormalizedRecord,
     RawSourceRecord,
 )
+from app.ingestion.http import BoundedHttpClient
 from app.ingestion.registry import SourceRegistry
 from app.ingestion.runner import IngestionRunner
 from app.ingestion.storage import RawPayloadStore
 from app.repositories import SQLiteRepositories
+from app.sources.arxiv import ARXIV_MINIMUM_REQUEST_INTERVAL_MS, ArxivConnector
+from app.sources.arxiv_ingestion import ArxivIngestionService
 
 
 class OfflineFixtureConnector:
@@ -93,7 +98,7 @@ def _fixture_records(count: int, observed_at: datetime) -> tuple[RawSourceRecord
     )
 
 
-async def _run(count: int) -> None:
+async def _run(count: int, *, live: bool) -> None:
     settings = load_settings()
     initialize_directories(settings.paths)
     database = SQLiteDatabase(
@@ -105,6 +110,9 @@ async def _run(count: int) -> None:
     now = datetime.now(UTC)
     try:
         repositories = SQLiteRepositories.for_connection(connection)
+        if live:
+            await _run_live(count, settings, connection, repositories, now)
+            return
         source = repositories.sources.get_by_key("fixture")
         if source is None:
             with transaction(connection):
@@ -148,11 +156,119 @@ async def _run(count: int) -> None:
         connection.close()
 
 
+async def _run_live(
+    count: int,
+    settings: AppSettings,
+    connection: sqlite3.Connection,
+    repositories: SQLiteRepositories,
+    now: datetime,
+) -> None:
+    if not settings.sources.arxiv_enabled:
+        raise RuntimeError("live arXiv retrieval is disabled by AIOS_SOURCES__ARXIV_ENABLED")
+    source = repositories.sources.get_by_key("arxiv")
+    source_config: JsonObject = {"categories": list(settings.sources.arxiv_categories)}
+    with transaction(connection):
+        if source is None:
+            source = repositories.sources.create(
+                Source(
+                    id=new_ulid(),
+                    source_key="arxiv",
+                    display_name="arXiv",
+                    trust_tier=TrustTier.A,
+                    base_url="https://export.arxiv.org",
+                    enabled=True,
+                    poll_interval_minutes=60,
+                    minimum_request_interval_ms=ARXIV_MINIMUM_REQUEST_INTERVAL_MS,
+                    connector_version=ArxivConnector.connector_version,
+                    config=source_config,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            source = repositories.sources.update(
+                source.model_copy(
+                    update={
+                        "display_name": "arXiv",
+                        "trust_tier": TrustTier.A,
+                        "base_url": "https://export.arxiv.org",
+                        "enabled": True,
+                        "poll_interval_minutes": 60,
+                        "minimum_request_interval_ms": ARXIV_MINIMUM_REQUEST_INTERVAL_MS,
+                        "connector_version": ArxivConnector.connector_version,
+                        "config": source_config,
+                        "updated_at": now,
+                    }
+                )
+            )
+        taxonomy = TopicTaxonomyService(repositories.topics, load_default_taxonomy())
+        taxonomy.seed()
+
+    http = BoundedHttpClient.from_settings(
+        settings.http,
+        settings.downloads,
+        settings.resources,
+    )
+    payload_store = RawPayloadStore(
+        settings.paths.data_root,
+        settings.paths.raw_documents_root,
+        settings.downloads.maximum_document_bytes,
+    )
+    connector = ArxivConnector(
+        http,
+        settings.sources.arxiv_categories,
+        minimum_request_interval_ms=source.minimum_request_interval_ms,
+        maximum_pages_per_run=1,
+    )
+    runner = IngestionRunner(
+        SourceRegistry(repositories.sources, (connector,)),
+        repositories.sources,
+        repositories.source_records,
+        repositories.pipeline_runs,
+        payload_store,
+        lambda: transaction(connection),
+        source_concurrency=settings.resources.source_download_concurrency,
+        maximum_pages=1,
+        id_factory=new_ulid,
+    )
+    service = ArxivIngestionService(
+        runner,
+        connector,
+        repositories.sources,
+        repositories.source_records,
+        CatalogIdentityService(
+            repositories.works,
+            repositories.work_versions,
+            repositories.catalog_identities,
+        ),
+        repositories.catalog_identities,
+        taxonomy,
+        repositories.topics,
+        payload_store,
+        lambda: transaction(connection),
+        clock=lambda: datetime.now(UTC),
+    )
+    try:
+        result = await service.sync(
+            since=now - timedelta(hours=settings.sources.metadata_overlap_hours),
+            until=now,
+            page_size=count,
+        )
+        print(result.model_dump_json(indent=2))
+    finally:
+        await http.aclose()
+
+
 def main(arguments: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--records", type=int, choices=range(1, 6), default=5)
+    parser.add_argument(
+        "--live",
+        action="store_true",
+        help="fetch and store at most five real records from the official arXiv API",
+    )
     options = parser.parse_args(arguments)
-    asyncio.run(_run(options.records))
+    asyncio.run(_run(options.records, live=options.live))
 
 
 if __name__ == "__main__":

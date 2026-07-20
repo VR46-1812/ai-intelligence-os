@@ -49,6 +49,38 @@ def test_default_settings_encode_hard_resource_policy() -> None:
     assert settings.models.analyst.keep_alive_seconds == 0
 
 
+def test_arxiv_categories_default_to_the_phase_one_allowlist() -> None:
+    settings = load_settings()
+
+    assert settings.sources.arxiv_categories == (
+        "cs.AI",
+        "cs.LG",
+        "cs.CL",
+        "cs.CV",
+        "cs.RO",
+        "stat.ML",
+    )
+
+
+def test_arxiv_category_allowlist_can_be_narrowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOS_SOURCES__ARXIV_CATEGORIES", '["cs.AI", "cs.CL"]')
+
+    assert load_settings().sources.arxiv_categories == ("cs.AI", "cs.CL")
+
+
+@pytest.mark.parametrize(
+    "configured",
+    ("[]", '["cs.AI", "cs.AI"]', '["cs.AI", "econ.EM"]'),
+)
+def test_arxiv_categories_reject_empty_duplicate_or_out_of_scope_values(
+    monkeypatch: pytest.MonkeyPatch, configured: str
+) -> None:
+    monkeypatch.setenv("AIOS_SOURCES__ARXIV_CATEGORIES", configured)
+
+    with pytest.raises(ConfigurationError, match="arxiv_categories"):
+        load_settings()
+
+
 def test_daily_work_limits_have_bounded_defaults() -> None:
     """Daily defaults limit broad briefs and expensive automatic analysis."""
     settings = load_settings()

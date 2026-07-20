@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:arxiv="http://arxiv.org/schemas/atom"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <opensearch:totalResults>4</opensearch:totalResults>
+  <entry>
+    <id>https://arxiv.org/abs/2607.01234v2</id>
+    <updated>2026-07-20T10:00:00Z</updated>
+    <published>2026-07-18T09:00:00Z</published>
+    <title>  Reliable   Local Agents, Revised </title>
+    <summary>Revision with deterministic evidence handling.</summary>
+    <author><name>Ada Lovelace</name></author>
+    <author><name>Grace Hopper</name></author>
+    <category term="cs.AI"/>
+    <category term="cs.LG"/>
+    <arxiv:primary_category term="cs.AI"/>
+    <arxiv:doi>https://doi.org/10.1234/LOCAL.2</arxiv:doi>
+    <arxiv:comment>Second revision</arxiv:comment>
+    <arxiv:journal_ref>Fixture Journal</arxiv:journal_ref>
+    <arxiv:license>http://arxiv.org/licenses/nonexclusive-distrib/1.0/</arxiv:license>
+    <link href="https://arxiv.org/abs/2607.01234v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2607.01234v2" title="pdf" type="application/pdf"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2607.01234v1</id>
+    <updated>2026-07-18T09:00:00Z</updated>
+    <published>2026-07-18T09:00:00Z</published>
+    <title>Reliable Local Agents</title>
+    <summary>Initial version.</summary>
+    <author><name>Ada Lovelace</name></author>
+    <author><name>Grace Hopper</name></author>
+    <category term="cs.AI"/>
+    <arxiv:primary_category term="cs.AI"/>
+    <arxiv:doi>10.1234/local.2</arxiv:doi>
+    <link href="https://arxiv.org/pdf/2607.01234v1" title="pdf" type="application/pdf"/>
+  </entry>
+  <entry>
+    <id>https://arxiv.org/abs/2607.05678v1</id>
+    <updated>2026-07-19T11:00:00+00:00</updated>
+    <published>2026-07-19T11:00:00+00:00</published>
+    <title>Partial Metadata Still Works</title>
+    <author><name>Katherine Johnson</name></author>
+    <category term="cs.CL"/>
+    <category term="cs.CL"/>
+    <arxiv:primary_category term="cs.CL"/>
+  </entry>
+  <entry>
+    <id>https://arxiv.org/abs/2607.09999v1</id>
+    <updated>2026-07-20T08:00:00Z</updated>
+    <published>2026-07-20T08:00:00Z</published>
+    <summary>This entry is deliberately missing its required title.</summary>
+    <author><name>Malformed Author</name></author>
+    <category term="cs.AI"/>
+  </entry>
+</feed>

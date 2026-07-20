@@ -19,6 +19,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MEBIBYTE = 1024 * 1024
 GIBIBYTE_IN_MEBIBYTES = 1024
+ArxivCategory = Literal["cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.RO", "stat.ML"]
 
 
 class ConfigurationError(RuntimeError):
@@ -140,10 +141,26 @@ class SourceSettings(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     arxiv_enabled: bool = True
+    arxiv_categories: tuple[ArxivCategory, ...] = (
+        "cs.AI",
+        "cs.LG",
+        "cs.CL",
+        "cs.CV",
+        "cs.RO",
+        "stat.ML",
+    )
     openreview_enabled: bool = True
     github_enrichment_enabled: bool = True
     metadata_overlap_hours: int = Field(default=24, ge=1, le=168)
     github_token: SecretStr | None = None
+
+    @model_validator(mode="after")
+    def validate_arxiv_categories(self) -> Self:
+        if not self.arxiv_categories:
+            raise ValueError("arxiv_categories must include at least one phase-one category")
+        if len(self.arxiv_categories) != len(set(self.arxiv_categories)):
+            raise ValueError("arxiv_categories must not contain duplicates")
+        return self
 
 
 class OllamaSettings(BaseModel):
