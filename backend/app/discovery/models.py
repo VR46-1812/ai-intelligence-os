@@ -19,6 +19,11 @@ class DiscoverySyncRequest(DiscoveryModel):
     lookback_hours: int = Field(default=168, ge=1, le=168)
 
 
+class BoundedSyncRequest(DiscoveryModel):
+    maximum_records: int = Field(default=5, ge=1, le=25)
+    lookback_hours: int = Field(default=168, ge=1, le=168)
+
+
 class SourceSummary(DiscoveryModel):
     source_key: str
     display_name: str

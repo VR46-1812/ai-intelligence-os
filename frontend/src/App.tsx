@@ -5,8 +5,11 @@ import {
   resolveApiHealthState,
   type ApiHealthState,
 } from "./apiHealth";
+import { ExplorePage } from "./ExplorePage";
+import { TodayPage } from "./TodayPage";
 
 const navigationItems = ["Today", "Explore", "Topics", "Opportunities", "System"] as const;
+type ActivePage = "today" | "explore";
 
 const healthCopy: Record<ApiHealthState, { label: string; detail: string }> = {
   loading: {
@@ -15,7 +18,7 @@ const healthCopy: Record<ApiHealthState, { label: string; detail: string }> = {
   },
   healthy: {
     label: "Local API healthy",
-    detail: "The private workspace service is ready.",
+    detail: "Private catalog and discovery are ready.",
   },
   unavailable: {
     label: "Local API unavailable",
@@ -23,8 +26,22 @@ const healthCopy: Record<ApiHealthState, { label: string; detail: string }> = {
   },
 };
 
+function routeFromHash(): { page: ActivePage; paperId: string | null } {
+  const route = window.location.hash.replace(/^#/, "");
+  if (route.startsWith("explore")) {
+    const encodedPaperId = route.split("/")[1];
+    return {
+      page: "explore",
+      paperId: encodedPaperId ? decodeURIComponent(encodedPaperId) : null,
+    };
+  }
+  return { page: "today", paperId: null };
+}
+
 function App() {
   const [healthState, setHealthState] = useState<ApiHealthState>(INITIAL_API_HEALTH_STATE);
+  const [route, setRoute] = useState(routeFromHash);
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
   const formattedDate = new Intl.DateTimeFormat("en", {
     weekday: "long",
     month: "short",
@@ -32,30 +49,27 @@ function App() {
   }).format(new Date());
 
   useEffect(() => {
-    const controller = new AbortController();
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
-
-    async function checkHealth(): Promise<void> {
-      const nextState = await resolveApiHealthState(
-        fetch,
-        `${apiBaseUrl}/health`,
-        controller.signal,
-      );
-      if (!controller.signal.aborted) {
-        setHealthState(nextState);
-      }
-    }
-
-    void checkHealth();
-    return () => controller.abort();
+    const onHashChange = () => setRoute(routeFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void resolveApiHealthState(fetch, `${apiBaseUrl}/health`, controller.signal).then(
+      (nextState) => {
+        if (!controller.signal.aborted) setHealthState(nextState);
+      },
+    );
+    return () => controller.abort();
+  }, [apiBaseUrl]);
 
   const currentHealth = healthCopy[healthState];
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="#workspace" aria-label="AI Intelligence OS home">
+        <a className="brand" href="#today" aria-label="AI Intelligence OS home">
           <span className="brand-mark" aria-hidden="true">AI</span>
           <span>
             <strong>Intelligence OS</strong>
@@ -66,28 +80,36 @@ function App() {
         <nav aria-label="Primary navigation">
           <p className="nav-label">Workspace</p>
           <ul>
-            {navigationItems.map((item, index) => (
-              <li key={item}>
-                <a className={index === 0 ? "active" : undefined} href={`#${item.toLowerCase()}`}>
-                  <span className="nav-dot" aria-hidden="true" />
-                  {item}
-                </a>
-              </li>
-            ))}
+            {navigationItems.map((item) => {
+              const itemKey = item.toLowerCase();
+              const implemented = itemKey === "today" || itemKey === "explore";
+              return (
+                <li key={item}>
+                  <a
+                    className={route.page === itemKey ? "active" : implemented ? undefined : "disabled"}
+                    href={implemented ? `#${itemKey}` : undefined}
+                    aria-disabled={!implemented}
+                  >
+                    <span className="nav-dot" aria-hidden="true" />
+                    {item}
+                  </a>
+                </li>
+              );
+            })}
           </ul>
         </nav>
 
         <div className="local-note">
           <span className="lock" aria-hidden="true">LOCAL</span>
-          <p>Your workspace is designed to keep data and inference on this machine.</p>
+          <p>Your papers, metadata, and future analysis stay on this machine.</p>
         </div>
       </aside>
 
       <div className="workspace" id="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">{formattedDate} · Foundation status</p>
-            <h1>Today</h1>
+            <p className="eyebrow">{formattedDate} · Local workspace</p>
+            <h1>{route.page === "explore" ? "Explore" : "Today"}</h1>
           </div>
           <div className={`health-pill ${healthState}`} role="status" aria-live="polite">
             <span className="status-dot" aria-hidden="true" />
@@ -98,53 +120,11 @@ function App() {
           </div>
         </header>
 
-        <main>
-          <section className="hero" aria-labelledby="foundation-heading">
-            <div>
-              <p className="eyebrow cyan">Foundation / M0.1</p>
-              <h2 id="foundation-heading">Your intelligence workspace is taking shape.</h2>
-              <p className="hero-copy">
-                The local application shell and API health boundary are ready. Discovery,
-                analysis, and reporting will arrive as bounded, testable milestones.
-              </p>
-            </div>
-            <div className="foundation-score" aria-label="Foundation milestone one of one ready">
-              <span>01</span>
-              <small>Foundation slice</small>
-            </div>
-          </section>
-
-          <section className="section-block" aria-labelledby="workspace-status-heading">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">System readiness</p>
-                <h2 id="workspace-status-heading">Workspace status</h2>
-              </div>
-              <span className="phase-badge">Scaffold only</span>
-            </div>
-
-            <div className="status-grid">
-              <article className="status-card featured">
-                <p className="card-index">01 / API</p>
-                <h3>Health boundary</h3>
-                <p>A typed FastAPI endpoint confirms the local service is available.</p>
-                <span className={`card-state ${healthState}`}>{currentHealth.label}</span>
-              </article>
-              <article className="status-card">
-                <p className="card-index">02 / INTERFACE</p>
-                <h3>Professional shell</h3>
-                <p>A responsive foundation for the high-density research workspace.</p>
-                <span className="card-state ready">Ready</span>
-              </article>
-              <article className="status-card muted-card">
-                <p className="card-index">03 / PIPELINE</p>
-                <h3>Intelligence pipeline</h3>
-                <p>Reserved for later milestones after the platform baseline is verified.</p>
-                <span className="card-state planned">Not implemented</span>
-              </article>
-            </div>
-          </section>
-        </main>
+        {route.page === "explore" ? (
+          <ExplorePage apiBaseUrl={apiBaseUrl} initialPaperId={route.paperId} />
+        ) : (
+          <TodayPage healthState={healthState} healthLabel={currentHealth.label} />
+        )}
       </div>
     </div>
   );

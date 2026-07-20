@@ -163,6 +163,21 @@ The corresponding API operations are `GET /api/discovery/sources`, `GET
 to one arXiv page, 1–25 records, and a 1–168 hour lookback. They retain all M2.1
 HTTP, provenance, concurrency, and persistence limits.
 
+## Catalog and Explore
+
+The first visible research slice reads normalized papers from SQLite through:
+
+- `GET /items` — paginated FTS keyword search with topic, source, publication
+  date, and deterministic sort filters.
+- `GET /items/{paper_id}` — current version, ordered authors, controlled topics,
+  normalized identities, source, and canonical external link.
+- `GET /catalog/filters` — populated topic and source filter options.
+- `POST /sources/arxiv/sync` — the existing one-page bounded discovery service.
+
+Open `http://127.0.0.1:5173/#explore` after starting the backend and frontend.
+The UI renders only API text, allowlists canonical arXiv/DOI HTTPS links, and
+never receives raw payloads or local filesystem paths.
+
 Create a consistent online backup from the repository root after the database
 has been initialized:
 

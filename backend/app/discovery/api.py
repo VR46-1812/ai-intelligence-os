@@ -11,7 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from app.config import AppSettings
 from app.db import SQLiteDatabase
 from app.discovery.arxiv import ArxivDiscoverySyncExecutor
-from app.discovery.models import ConnectorHealth, DiscoverySyncRequest, SourceSummary
+from app.discovery.models import (
+    BoundedSyncRequest,
+    ConnectorHealth,
+    DiscoverySyncRequest,
+    SourceSummary,
+)
 from app.discovery.service import (
     DiscoveryDisabledError,
     DiscoveryNotFoundError,
@@ -22,6 +27,7 @@ from app.repositories import SQLiteRepositories
 from app.sources.arxiv_ingestion import ArxivSyncResult
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
+public_router = APIRouter(tags=["discovery"])
 
 
 async def get_discovery_service(request: Request) -> AsyncIterator[DiscoveryService]:
@@ -95,3 +101,21 @@ async def start_sync(
         raise _not_found(error) from error
     except DiscoveryDisabledError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@public_router.post("/sources/{source_key}/sync", response_model=ArxivSyncResult)
+async def start_source_sync(
+    source_key: str,
+    request: BoundedSyncRequest,
+    service: DiscoveryServiceDependency,
+) -> ArxivSyncResult:
+    if source_key != "arxiv":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found.")
+    return await start_sync(
+        DiscoverySyncRequest(
+            source_key="arxiv",
+            maximum_records=request.maximum_records,
+            lookback_hours=request.lookback_hours,
+        ),
+        service,
+    )

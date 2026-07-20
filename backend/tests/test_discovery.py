@@ -19,7 +19,7 @@ from pydantic import ValidationError
 
 from app.config import REPOSITORY_ROOT, SourceSettings
 from app.db import MigrationRunner, SQLiteDatabase, transaction
-from app.discovery.api import get_discovery_service, router
+from app.discovery.api import get_discovery_service, public_router, router
 from app.discovery.cli import main as discovery_main
 from app.discovery.models import DiscoverySyncRequest
 from app.discovery.service import DiscoveryDisabledError, DiscoveryService
@@ -169,6 +169,7 @@ def test_service_refuses_disabled_source(
 async def _exercise_api(service: DiscoveryService) -> None:
     application = FastAPI()
     application.include_router(router)
+    application.include_router(public_router)
     application.dependency_overrides[get_discovery_service] = lambda: service
     transport = ASGITransport(app=application)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
@@ -178,6 +179,10 @@ async def _exercise_api(service: DiscoveryService) -> None:
         sync = await client.post(
             "/api/discovery/sync",
             json={"source_key": "arxiv", "maximum_records": 3, "lookback_hours": 24},
+        )
+        canonical_sync = await client.post(
+            "/sources/arxiv/sync",
+            json={"maximum_records": 2, "lookback_hours": 24},
         )
         missing = await client.get("/api/discovery/runs/missing")
         unbounded = await client.post(
@@ -189,6 +194,8 @@ async def _exercise_api(service: DiscoveryService) -> None:
     assert health.status_code == 200 and health.json()["health_status"] == "healthy"
     assert run.status_code == 200 and run.json()["id"] == "run-discovery"
     assert sync.status_code == 200 and sync.json()["ingestion"]["records_seen"] == 3
+    assert canonical_sync.status_code == 200
+    assert canonical_sync.json()["ingestion"]["records_seen"] == 2
     assert missing.status_code == 404
     assert unbounded.status_code == 422
 
