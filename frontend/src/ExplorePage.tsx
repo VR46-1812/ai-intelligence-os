@@ -6,9 +6,11 @@ import {
   type CatalogPaper,
   type CatalogPaperPage,
   type CatalogQuery,
+  type EvidencePage,
   fetchCatalogFilters,
   fetchCatalogPage,
   fetchPaperDetail,
+  fetchPaperEvidence,
   safeExternalUrl,
   syncLatestResearch,
   type SyncResult,
@@ -60,6 +62,10 @@ function authorLine(paper: CatalogPaper): string {
     : visible.join(", ");
 }
 
+function score(value: number | null): string {
+  return value === null ? "Pending" : value.toFixed(1);
+}
+
 function LoadingCards() {
   return (
     <div className="paper-list" aria-label="Loading research papers">
@@ -79,9 +85,11 @@ interface PaperDetailProps {
   readonly paper: CatalogPaper | null;
   readonly state: "loading" | "ready" | "error";
   readonly onClose: () => void;
+  readonly evidence: EvidencePage | null;
+  readonly evidenceState: "loading" | "ready" | "error";
 }
 
-function PaperDetail({ paper, state, onClose }: PaperDetailProps) {
+function PaperDetail({ paper, state, onClose, evidence, evidenceState }: PaperDetailProps) {
   return (
     <aside className="detail-panel" aria-label="Paper detail" aria-live="polite">
       <button className="detail-close" type="button" onClick={onClose} aria-label="Close paper detail">
@@ -119,6 +127,47 @@ function PaperDetail({ paper, state, onClose }: PaperDetailProps) {
               )) : <span className="muted-copy">No topic assignment</span>}
             </div>
           </section>
+          <section className="ranking-panel" aria-labelledby="detail-ranking-heading">
+            <p className="eyebrow" id="detail-ranking-heading">Deterministic ranking</p>
+            <div className="score-grid">
+              <span><strong>{score(paper.ranking.technical)}</strong>Technical</span>
+              <span><strong>{score(paper.ranking.commercial)}</strong>Commercial</span>
+              <span><strong>{score(paper.ranking.deep_dive_priority)}</strong>Deep-dive priority</span>
+            </div>
+            {Object.keys(paper.ranking.technical_components).length > 0 && (
+              <details>
+                <summary>Technical signal breakdown</summary>
+                <div className="signal-list">
+                  {Object.entries(paper.ranking.technical_components).map(([key, value]) => (
+                    <span key={key}><b>{key}</b>{value.toFixed(1)} points</span>
+                  ))}
+                </div>
+              </details>
+            )}
+          </section>
+          <section className="evidence-panel" aria-labelledby="detail-evidence-heading">
+            <div className="evidence-heading">
+              <p className="eyebrow" id="detail-evidence-heading">Cited document evidence</p>
+              <span className={`document-state ${paper.document_status}`}>{paper.document_status.replace("_", " ")}</span>
+            </div>
+            {evidenceState === "loading" && <p className="muted-copy">Loading page references…</p>}
+            {evidenceState === "error" && <p className="evidence-warning">Evidence could not be loaded.</p>}
+            {evidenceState === "ready" && evidence && evidence.items.length === 0 && (
+              <p className="muted-copy">No extracted evidence yet. Process this paper locally to add page citations.</p>
+            )}
+            {evidenceState === "ready" && evidence && evidence.items.length > 0 && (
+              <div className="evidence-list">
+                {evidence.items.map((item) => {
+                  const pageUrl = safeExternalUrl(`${item.source_url}#page=${item.page_start ?? 1}`);
+                  return <article key={item.id}>
+                    <div><span>Page {item.page_start ?? "—"}</span>{item.section_path && <span>{item.section_path}</span>}</div>
+                    <p>{item.span_text}</p>
+                    {pageUrl && <a href={pageUrl} target="_blank" rel="noreferrer noopener">Open source page ↗</a>}
+                  </article>;
+                })}
+              </div>
+            )}
+          </section>
           {safeExternalUrl(paper.external_url) && (
             <a
               className="primary-link"
@@ -146,6 +195,8 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
   const [detail, setDetail] = useState<CatalogPaper | null>(null);
   const [detailState, setDetailState] = useState<"loading" | "ready" | "error">("loading");
   const [syncState, setSyncState] = useState<SyncState>({ kind: "idle" });
+  const [evidence, setEvidence] = useState<EvidencePage | null>(null);
+  const [evidenceState, setEvidenceState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -184,6 +235,15 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
     return () => controller.abort();
   }, [apiBaseUrl, selectedId]);
 
+  useEffect(() => {
+    if (selectedId === null) return;
+    const controller = new AbortController();
+    void fetchPaperEvidence(fetch, apiBaseUrl, selectedId, controller.signal)
+      .then((result) => { setEvidence(result); setEvidenceState("ready"); })
+      .catch(() => { if (!controller.signal.aborted) setEvidenceState("error"); });
+    return () => controller.abort();
+  }, [apiBaseUrl, selectedId]);
+
   const pageNumber = useMemo(
     () => Math.floor(query.offset / query.limit) + 1,
     [query.limit, query.offset],
@@ -211,6 +271,8 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
   function openDetail(paperId: string) {
     setDetail(null);
     setDetailState("loading");
+    setEvidence(null);
+    setEvidenceState("loading");
     setSelectedId(paperId);
     window.history.replaceState(null, "", `#explore/${encodeURIComponent(paperId)}`);
   }
@@ -310,6 +372,9 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
               <option value="oldest">Oldest first</option>
               <option value="updated">Recently updated</option>
               <option value="title">Title A–Z</option>
+              <option value="technical">Technical score</option>
+              <option value="commercial">Commercial score</option>
+              <option value="deep_dive">Deep-dive priority</option>
             </select>
           </label>
           <button className="clear-button" type="button" onClick={clearFilters}>Clear filters</button>
@@ -356,6 +421,7 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
                       <span className="source-badge">{paper.source_name}</span>
                       <span>{formatDate(paper.published_at)}</span>
                       <span>{paper.current_version}</span>
+                      <span className={`document-state ${paper.document_status}`}>{paper.document_status.replace("_", " ")}</span>
                     </div>
                     <button className="paper-title" type="button" onClick={() => openDetail(paper.id)}>
                       {paper.title}
@@ -374,6 +440,11 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
                           </a>
                         )}
                       </div>
+                    </div>
+                    <div className="card-score-row" aria-label="Ranking scores">
+                      <span><b>{score(paper.ranking.technical)}</b> technical</span>
+                      <span><b>{score(paper.ranking.commercial)}</b> commercial</span>
+                      <span><b>{paper.evidence_count}</b> evidence spans</span>
                     </div>
                     {paper.match_reason && <p className="match-reason">Matched by {paper.match_reason}</p>}
                   </article>
@@ -408,7 +479,7 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
             </nav>
           )}
         </div>
-        {selectedId && <PaperDetail paper={detail} state={detailState} onClose={closeDetail} />}
+        {selectedId && <PaperDetail paper={detail} state={detailState} onClose={closeDetail} evidence={evidence} evidenceState={evidenceState} />}
       </section>
     </main>
   );

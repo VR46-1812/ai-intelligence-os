@@ -58,6 +58,26 @@ Open `http://127.0.0.1:5173`. The API documentation is at
 `http://127.0.0.1:8000/docs`, and the health contract is available at
 `http://127.0.0.1:8000/health`.
 
+## Process five stored arXiv papers
+
+After a bounded arXiv sync has stored metadata, acquire and extract at most five
+current PDFs and calculate deterministic rankings:
+
+```powershell
+Set-Location D:\Rujay\ai-intelligence-os\backend
+uv run python -m app.documents.cli --limit 5
+```
+
+The command accepts only limits from 1 through 25. Downloads are HTTPS-only from
+approved arXiv hosts, capped by the configured byte limit, streamed with SHA-256,
+and run within the configured maximum concurrency. It does not invoke Ollama or OCR.
+Rerunning skips current versions that already have parsed evidence and creates a
+new active ranking-profile version without mutating prior ranking results.
+
+Explore reads ranking and document state through `GET /items`, paper evidence through
+`GET /items/{id}/evidence`, and can replay the bounded deterministic rank stage with
+`POST /pipeline/rank?limit=100`.
+
 The Vite development server proxies `/api` requests to the local backend. To
 override the frontend API base path, copy `.env.example` to `.env` and update
 `VITE_API_BASE_URL`.

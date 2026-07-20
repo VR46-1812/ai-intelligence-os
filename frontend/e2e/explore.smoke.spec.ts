@@ -31,6 +31,9 @@ test("Explore loads stored SQLite papers, searches, opens detail, and reports sy
   await expect(page.getByRole("complementary", { name: "Paper detail" })).toContainText(
     title ?? "",
   );
+  await expect(page.getByText("Deterministic ranking")).toBeVisible();
+  await expect(page.getByText("Cited document evidence")).toBeVisible();
+  await expect(page.getByText(/evidence spans/).first()).toBeVisible();
   await expect(page.getByRole("link", { name: /View canonical paper/ })).toHaveAttribute(
     "href",
     /^https:\/\/arxiv\.org\/abs\//,

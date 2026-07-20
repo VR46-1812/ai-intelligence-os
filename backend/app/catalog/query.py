@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from collections import defaultdict
@@ -16,6 +17,7 @@ from app.catalog.read_models import (
     CatalogPaper,
     CatalogPaperPage,
     CatalogPaperQuery,
+    CatalogRanking,
     CatalogSort,
     CatalogSourceOption,
     CatalogTopic,
@@ -39,7 +41,34 @@ _SORT_SQL = {
     CatalogSort.OLDEST: "publication_date IS NULL, publication_date ASC, w.id ASC",
     CatalogSort.TITLE: "w.normalized_title ASC, w.id ASC",
     CatalogSort.UPDATED: "w.updated_at DESC, w.id ASC",
+    CatalogSort.TECHNICAL: (
+        "technical_score IS NULL, technical_score DESC, publication_date DESC, w.id ASC"
+    ),
+    CatalogSort.COMMERCIAL: (
+        "commercial_score IS NULL, commercial_score DESC, publication_date DESC, w.id ASC"
+    ),
+    CatalogSort.DEEP_DIVE: "deep_score IS NULL, deep_score DESC, publication_date DESC, w.id ASC",
 }
+
+_CATALOG_SELECT = """w.id, v.title, v.abstract, w.publication_status,
+COALESCE(v.published_at, w.first_published_at) AS publication_date,
+w.updated_at, v.version_label, s.source_key, s.display_name,
+(SELECT d.parse_status FROM documents d WHERE d.work_version_id=v.id AND d.document_role='paper_pdf'
+ ORDER BY d.acquired_at DESC,d.id DESC LIMIT 1) document_parse_status,
+(SELECT a.status FROM document_acquisition_attempts a WHERE a.work_version_id=v.id
+ ORDER BY a.attempted_at DESC,a.id DESC LIMIT 1) acquisition_status,
+(SELECT COUNT(*) FROM evidence_spans e JOIN documents ed ON ed.id=e.document_id
+ WHERE ed.work_version_id=v.id) evidence_count,
+(SELECT rr.total_score FROM ranking_results rr JOIN ranking_profiles rp ON rp.id=rr.profile_id
+ WHERE rr.work_id=w.id AND rp.active=1 AND rr.score_kind='technical' LIMIT 1) technical_score,
+(SELECT rr.components_json FROM ranking_results rr JOIN ranking_profiles rp ON rp.id=rr.profile_id
+ WHERE rr.work_id=w.id AND rp.active=1 AND rr.score_kind='technical' LIMIT 1) technical_components,
+(SELECT rr.calculated_at FROM ranking_results rr JOIN ranking_profiles rp ON rp.id=rr.profile_id
+ WHERE rr.work_id=w.id AND rp.active=1 AND rr.score_kind='technical' LIMIT 1) ranking_calculated_at,
+(SELECT rr.total_score FROM ranking_results rr JOIN ranking_profiles rp ON rp.id=rr.profile_id
+ WHERE rr.work_id=w.id AND rp.active=1 AND rr.score_kind='commercial' LIMIT 1) commercial_score,
+(SELECT rr.total_score FROM ranking_results rr JOIN ranking_profiles rp ON rp.id=rr.profile_id
+ WHERE rr.work_id=w.id AND rp.active=1 AND rr.score_kind='deep_dive_priority' LIMIT 1) deep_score"""
 
 
 class CatalogReadRepository(Protocol):
@@ -62,9 +91,7 @@ class SQLiteCatalogReadRepository:
                 f"SELECT COUNT(*) {_BASE_FROM} {where_sql}", parameters
             ).fetchone()
             rows = self._connection.execute(
-                f"""SELECT w.id, v.title, v.abstract, w.publication_status,
-                COALESCE(v.published_at, w.first_published_at) AS publication_date,
-                w.updated_at, v.version_label, s.source_key, s.display_name
+                f"""SELECT {_CATALOG_SELECT}
                 {_BASE_FROM} {where_sql}
                 ORDER BY {_SORT_SQL[query.sort]} LIMIT ? OFFSET ?""",
                 (*parameters, query.limit, query.offset),
@@ -84,9 +111,7 @@ class SQLiteCatalogReadRepository:
     def get_paper(self, paper_id: str) -> CatalogPaper | None:
         try:
             rows = self._connection.execute(
-                f"""SELECT w.id, v.title, v.abstract, w.publication_status,
-                COALESCE(v.published_at, w.first_published_at) AS publication_date,
-                w.updated_at, v.version_label, s.source_key, s.display_name
+                f"""SELECT {_CATALOG_SELECT}
                 {_BASE_FROM} WHERE {_BASE_WHERE} AND w.id = ?""",
                 (paper_id,),
             ).fetchall()
@@ -268,10 +293,31 @@ class SQLiteCatalogReadRepository:
                         "source_name": row["display_name"],
                         "external_url": primary_url,
                         "match_reason": match_reason,
+                        "document_status": self._document_status(row),
+                        "evidence_count": row["evidence_count"],
+                        "ranking": CatalogRanking(
+                            technical=row["technical_score"],
+                            commercial=row["commercial_score"],
+                            deep_dive_priority=row["deep_score"],
+                            technical_components=(
+                                {}
+                                if row["technical_components"] is None
+                                else json.loads(str(row["technical_components"]))
+                            ),
+                            calculated_at=row["ranking_calculated_at"],
+                        ),
                     }
                 )
             )
         return tuple(papers)
+
+    @staticmethod
+    def _document_status(row: sqlite3.Row) -> str:
+        if row["document_parse_status"] is not None:
+            return str(row["document_parse_status"])
+        if row["acquisition_status"] is not None:
+            return str(row["acquisition_status"])
+        return "not_acquired"
 
     @staticmethod
     def _identity_url(id_type: ExternalIdType, value: str) -> str | None:

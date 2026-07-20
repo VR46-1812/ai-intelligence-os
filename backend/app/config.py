@@ -95,7 +95,7 @@ class PathSettings(BaseModel):
 
 
 class DownloadSettings(BaseModel):
-    """Bounded document download settings; no downloader is implemented here."""
+    """Bounded document download settings shared by safe acquisition."""
 
     model_config = ConfigDict(frozen=True)
 

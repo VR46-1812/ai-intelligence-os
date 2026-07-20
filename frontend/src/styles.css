@@ -807,6 +807,78 @@ main {
   text-transform: uppercase;
 }
 
+.card-score-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.8rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.card-score-row span {
+  padding: 0.3rem 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 0.45rem;
+  background: rgba(15, 23, 42, 0.48);
+}
+
+.card-score-row b { color: #b7f3ff; }
+
+.document-state {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 0.22rem 0.45rem;
+  border-radius: 999px;
+  color: #aebaca;
+  background: rgba(100, 116, 139, 0.13);
+  text-transform: capitalize;
+  font-size: 0.68rem;
+}
+
+.document-state.parsed,
+.document-state.partial { color: #70e7cc; background: rgba(45, 212, 191, 0.1); }
+.document-state.failed,
+.document-state.quarantined { color: #ffaeae; background: rgba(248, 113, 113, 0.1); }
+
+.ranking-panel,
+.evidence-panel {
+  padding-top: 1rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.score-grid span {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem;
+  border-radius: 0.6rem;
+  background: rgba(15, 23, 42, 0.62);
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.score-grid strong { color: #b7f3ff; font-size: 1rem; }
+.ranking-panel details { margin-top: 0.75rem; color: var(--muted); font-size: 0.75rem; }
+.ranking-panel summary { cursor: pointer; color: #cbd5e1; }
+.signal-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.35rem; margin-top: 0.5rem; }
+.signal-list span { display: flex; justify-content: space-between; padding: 0.35rem; background: rgba(15, 23, 42, 0.45); }
+.signal-list b { color: #7dd3fc; }
+
+.evidence-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.evidence-list { display: grid; gap: 0.65rem; max-height: 26rem; overflow: auto; padding-right: 0.25rem; }
+.evidence-list article { padding: 0.75rem; border: 1px solid rgba(125, 211, 252, 0.13); border-radius: 0.65rem; background: rgba(15, 23, 42, 0.5); }
+.evidence-list article > div { display: flex; gap: 0.6rem; color: #7dd3fc; font-size: 0.68rem; }
+.evidence-list p { margin: 0.5rem 0; color: #cbd5e1; font-size: 0.76rem; line-height: 1.55; }
+.evidence-list a { color: #67e8f9; font-size: 0.7rem; }
+.evidence-warning { color: #fca5a5; font-size: 0.78rem; }
+
 .detail-panel {
   position: sticky;
   top: 20px;

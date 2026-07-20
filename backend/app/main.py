@@ -15,6 +15,8 @@ from app.config import AppSettings, initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.discovery.api import public_router as public_discovery_router
 from app.discovery.api import router as discovery_router
+from app.documents.api import router as documents_router
+from app.ranking.api import router as ranking_router
 from app.repositories import SQLiteRepositories
 from app.sources.catalog import upsert_arxiv_source
 
@@ -85,6 +87,8 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.include_router(discovery_router)
     application.include_router(public_discovery_router)
     application.include_router(catalog_router)
+    application.include_router(documents_router)
+    application.include_router(ranking_router)
 
     return application
 

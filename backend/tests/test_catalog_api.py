@@ -280,6 +280,25 @@ def test_repository_paginates_filters_searches_and_sorts_deterministically(
     injection = repository.list_papers(CatalogPaperQuery(q="' OR 1=1 --"))
     assert injection.total == 0
     assert connection.execute("SELECT COUNT(*) FROM works").fetchone()[0] == 3
+    with transaction(connection):
+        connection.execute(
+            """INSERT INTO ranking_profiles
+            (id,profile_key,version,weights_json,normalization_json,active,created_at)
+            VALUES ('profile','default',1,'{}','{}',1,'2026-07-20T00:00:00Z')"""
+        )
+        connection.executemany(
+            """INSERT INTO ranking_results
+            (id,work_id,profile_id,score_kind,total_score,components_json,
+            feature_snapshot_json,calculated_at)
+            VALUES (?,?,'profile','technical',?,'{}','{}',?)""",
+            [
+                ("rank-agent", "work-agent", 52.0, "2026-07-20T00:00:00Z"),
+                ("rank-local", "work-local", 81.0, "2026-07-20T00:00:00Z"),
+            ],
+        )
+    ranked = repository.list_papers(CatalogPaperQuery(sort=CatalogSort.TECHNICAL))
+    assert [paper.id for paper in ranked.items[:2]] == ["work-local", "work-agent"]
+    assert ranked.items[0].ranking.technical == 81.0
 
 
 def test_repository_detail_hydrates_public_fields_without_raw_provenance_paths(
@@ -293,6 +312,7 @@ def test_repository_detail_hydrates_public_fields_without_raw_provenance_paths(
     assert [topic.key for topic in paper.topics] == ["agentic-systems"]
     assert {identity.id_type.value for identity in paper.identities} == {"arxiv", "doi"}
     assert paper.external_url == "https://arxiv.org/abs/2607.00001"
+    assert paper.document_status == "not_acquired" and paper.evidence_count == 0
     serialized = paper.model_dump_json()
     assert "raw/private" not in serialized
     assert "payload" not in serialized

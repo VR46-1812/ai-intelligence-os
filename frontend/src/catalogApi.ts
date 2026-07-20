@@ -30,6 +30,36 @@ export interface CatalogPaper {
   readonly source_name: string;
   readonly external_url: string | null;
   readonly match_reason: string | null;
+  readonly document_status: string;
+  readonly evidence_count: number;
+  readonly ranking: {
+    readonly technical: number | null;
+    readonly commercial: number | null;
+    readonly deep_dive_priority: number | null;
+    readonly technical_components: Readonly<Record<string, number>>;
+    readonly calculated_at: string | null;
+  };
+}
+
+export interface EvidenceItem {
+  readonly id: string;
+  readonly document_id: string;
+  readonly source_url: string;
+  readonly media_type: string;
+  readonly document_sha256: string;
+  readonly section_path: string | null;
+  readonly page_start: number | null;
+  readonly page_end: number | null;
+  readonly span_text: string;
+  readonly created_at: string;
+}
+
+export interface EvidencePage {
+  readonly items: readonly EvidenceItem[];
+  readonly total: number;
+  readonly limit: number;
+  readonly offset: number;
+  readonly has_more: boolean;
 }
 
 export interface CatalogPaperPage {
@@ -51,7 +81,7 @@ export interface CatalogQuery {
   readonly source: string;
   readonly publishedFrom: string;
   readonly publishedTo: string;
-  readonly sort: "newest" | "oldest" | "title" | "updated";
+  readonly sort: "newest" | "oldest" | "title" | "updated" | "technical" | "commercial" | "deep_dive";
   readonly limit: number;
   readonly offset: number;
 }
@@ -108,6 +138,7 @@ function isTopic(value: unknown): value is CatalogTopic {
 
 function isPaper(value: unknown): value is CatalogPaper {
   if (!isRecord(value)) return false;
+  const ranking = value.ranking;
   return (
     typeof value.id === "string" &&
     typeof value.title === "string" &&
@@ -122,8 +153,32 @@ function isPaper(value: unknown): value is CatalogPaper {
     typeof value.source_key === "string" &&
     typeof value.source_name === "string" &&
     isStringOrNull(value.external_url) &&
-    isStringOrNull(value.match_reason)
+    isStringOrNull(value.match_reason) &&
+    typeof value.document_status === "string" &&
+    typeof value.evidence_count === "number" &&
+    isRecord(ranking) &&
+    (typeof ranking.technical === "number" || ranking.technical === null) &&
+    (typeof ranking.commercial === "number" || ranking.commercial === null) &&
+    (typeof ranking.deep_dive_priority === "number" || ranking.deep_dive_priority === null) &&
+    isRecord(ranking.technical_components) &&
+    Object.values(ranking.technical_components).every((item) => typeof item === "number") &&
+    isStringOrNull(ranking.calculated_at)
   );
+}
+
+function isEvidenceItem(value: unknown): value is EvidenceItem {
+  return isRecord(value) && typeof value.id === "string" && typeof value.document_id === "string" &&
+    typeof value.source_url === "string" && typeof value.media_type === "string" &&
+    typeof value.document_sha256 === "string" && isStringOrNull(value.section_path) &&
+    (typeof value.page_start === "number" || value.page_start === null) &&
+    (typeof value.page_end === "number" || value.page_end === null) &&
+    typeof value.span_text === "string" && typeof value.created_at === "string";
+}
+
+function isEvidencePage(value: unknown): value is EvidencePage {
+  return isRecord(value) && Array.isArray(value.items) && value.items.every(isEvidenceItem) &&
+    typeof value.total === "number" && typeof value.limit === "number" &&
+    typeof value.offset === "number" && typeof value.has_more === "boolean";
 }
 
 function isPaperPage(value: unknown): value is CatalogPaperPage {
@@ -215,6 +270,20 @@ export async function fetchPaperDetail(
     }),
   );
   if (!isPaper(payload)) throw new CatalogApiError("The paper response was invalid.");
+  return payload;
+}
+
+export async function fetchPaperEvidence(
+  fetcher: Fetcher,
+  apiBaseUrl: string,
+  paperId: string,
+  signal: AbortSignal,
+): Promise<EvidencePage> {
+  const payload = await readJson(await fetcher(
+    `${apiBaseUrl}/items/${encodeURIComponent(paperId)}/evidence?limit=12&offset=0`,
+    { headers: { Accept: "application/json" }, signal },
+  ));
+  if (!isEvidencePage(payload)) throw new CatalogApiError("The evidence response was invalid.");
   return payload;
 }
 

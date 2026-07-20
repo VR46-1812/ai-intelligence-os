@@ -1,0 +1,1 @@
+"""Deterministic, replayable catalog ranking."""

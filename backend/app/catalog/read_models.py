@@ -23,6 +23,9 @@ class CatalogSort(StrEnum):
     OLDEST = "oldest"
     TITLE = "title"
     UPDATED = "updated"
+    TECHNICAL = "technical"
+    COMMERCIAL = "commercial"
+    DEEP_DIVE = "deep_dive"
 
 
 class CatalogPaperQuery(CatalogModel):
@@ -69,6 +72,14 @@ class CatalogTopic(CatalogModel):
     name: str
 
 
+class CatalogRanking(CatalogModel):
+    technical: float | None = Field(default=None, ge=0, le=100)
+    commercial: float | None = Field(default=None, ge=0, le=100)
+    deep_dive_priority: float | None = Field(default=None, ge=0, le=100)
+    technical_components: dict[str, float] = Field(default_factory=dict)
+    calculated_at: UtcDateTime | None = None
+
+
 class CatalogPaper(CatalogModel):
     id: str
     title: str
@@ -84,6 +95,9 @@ class CatalogPaper(CatalogModel):
     source_name: str
     external_url: str | None
     match_reason: str | None = None
+    document_status: str
+    evidence_count: int = Field(ge=0)
+    ranking: CatalogRanking
 
 
 class CatalogPaperPage(CatalogModel):

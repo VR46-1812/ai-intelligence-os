@@ -5,6 +5,7 @@ import {
   type CatalogPaper,
   type CatalogQuery,
   fetchCatalogPage,
+  fetchPaperEvidence,
   safeExternalUrl,
   syncLatestResearch,
 } from "./catalogApi";
@@ -41,6 +42,15 @@ const paper: CatalogPaper = {
   source_name: "arXiv",
   external_url: "https://arxiv.org/abs/2607.00001",
   match_reason: "keyword match",
+  document_status: "parsed",
+  evidence_count: 3,
+  ranking: {
+    technical: 72.5,
+    commercial: 50,
+    deep_dive_priority: 69.9,
+    technical_components: { R: 20, E: 9.75 },
+    calculated_at: "2026-07-20T00:00:00Z",
+  },
 };
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -118,6 +128,35 @@ describe("catalog API client", () => {
         method: "POST",
         body: JSON.stringify({ maximum_records: 5, lookback_hours: 168 }),
       }),
+    );
+  });
+
+  it("loads page-citable evidence without accepting local path fields", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+      items: [{
+        id: "evidence-1",
+        document_id: "document-1",
+        source_url: "https://arxiv.org/pdf/2607.00001v1",
+        media_type: "application/pdf",
+        document_sha256: "abc123",
+        section_path: "Introduction",
+        page_start: 2,
+        page_end: 2,
+        span_text: "A bounded evidence span.",
+        created_at: "2026-07-20T00:00:00Z",
+      }],
+      total: 1,
+      limit: 12,
+      offset: 0,
+      has_more: false,
+    }));
+
+    const page = await fetchPaperEvidence(fetcher, "/api", "work-1", signal);
+
+    expect(page.items[0]?.page_start).toBe(2);
+    expect(fetcher).toHaveBeenCalledWith(
+      "/api/items/work-1/evidence?limit=12&offset=0",
+      expect.objectContaining({ signal }),
     );
   });
 });
