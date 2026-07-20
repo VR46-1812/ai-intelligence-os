@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "taxonomy_version": "2026.1",
+  "topics": [
+    {
+      "topic_key": "unknown",
+      "display_name": "Unknown",
+      "description": "Records without a deterministic controlled-topic match.",
+      "parent_topic_key": null,
+      "active": true
+    },
+    {
+      "topic_key": "ai-systems",
+      "display_name": "AI Systems",
+      "description": "Core AI research and production engineering.",
+      "parent_topic_key": null,
+      "active": true
+    },
+    {
+      "topic_key": "agentic-systems",
+      "display_name": "Agentic Systems",
+      "description": "Tool use, planning, memory, and multi-agent engineering.",
+      "parent_topic_key": "ai-systems",
+      "active": true
+    },
+    {
+      "topic_key": "retrieval-intelligence",
+      "display_name": "Retrieval Intelligence",
+      "description": "RAG, reranking, citations, document intelligence, and knowledge graphs.",
+      "parent_topic_key": "ai-systems",
+      "active": true
+    },
+    {
+      "topic_key": "local-models",
+      "display_name": "Local and Open Models",
+      "description": "Open-weight deployment, quantization, inference optimization, and routing.",
+      "parent_topic_key": "ai-systems",
+      "active": true
+    },
+    {
+      "topic_key": "ai-quality-security",
+      "display_name": "AI Quality and Security",
+      "description": "Evaluation, observability, hallucination control, security, and reliability.",
+      "parent_topic_key": "ai-systems",
+      "active": true
+    },
+    {
+      "topic_key": "multimodal-systems",
+      "display_name": "Multimodal Systems",
+      "description": "Document understanding, vision-language, speech, and video systems.",
+      "parent_topic_key": "ai-systems",
+      "active": true
+    },
+    {
+      "topic_key": "commercial-verticals",
+      "display_name": "Commercial Verticals",
+      "description": "Priority markets for practical AI products and workflows.",
+      "parent_topic_key": null,
+      "active": true
+    },
+    {
+      "topic_key": "education-ai",
+      "display_name": "Education AI",
+      "description": "AI assistants and workflows for United States schools.",
+      "parent_topic_key": "commercial-verticals",
+      "active": true
+    },
+    {
+      "topic_key": "tender-intelligence",
+      "display_name": "Tender Intelligence",
+      "description": "Tender, RFP, and bid intelligence workflows.",
+      "parent_topic_key": "commercial-verticals",
+      "active": true
+    },
+    {
+      "topic_key": "financial-intelligence",
+      "display_name": "Financial Intelligence",
+      "description": "Financial research, stock risk, and regulated information retrieval.",
+      "parent_topic_key": "commercial-verticals",
+      "active": true
+    },
+    {
+      "topic_key": "real-estate-automation",
+      "display_name": "Real-Estate Automation",
+      "description": "RentAssure marketing and operational automation.",
+      "parent_topic_key": "commercial-verticals",
+      "active": true
+    },
+    {
+      "topic_key": "indian-smb-workflows",
+      "display_name": "Indian SMB Workflows",
+      "description": "Sellable AI workflows for Indian companies in the target revenue range.",
+      "parent_topic_key": "commercial-verticals",
+      "active": true
+    }
+  ],
+  "source_category_mappings": [
+    {"source_key": "arxiv", "source_category": "cs.AI", "topic_keys": ["agentic-systems", "ai-quality-security"]},
+    {"source_key": "arxiv", "source_category": "cs.LG", "topic_keys": ["local-models", "ai-quality-security"]},
+    {"source_key": "arxiv", "source_category": "cs.CL", "topic_keys": ["retrieval-intelligence", "local-models"]},
+    {"source_key": "arxiv", "source_category": "cs.CV", "topic_keys": ["multimodal-systems"]},
+    {"source_key": "arxiv", "source_category": "cs.RO", "topic_keys": ["agentic-systems"]},
+    {"source_key": "arxiv", "source_category": "stat.ML", "topic_keys": ["ai-quality-security"]}
+  ],
+  "user_weights": {
+    "unknown": 0.0,
+    "ai-systems": 0.8,
+    "agentic-systems": 1.0,
+    "retrieval-intelligence": 0.95,
+    "local-models": 0.9,
+    "ai-quality-security": 0.85,
+    "multimodal-systems": 0.8,
+    "commercial-verticals": 0.7,
+    "education-ai": 0.75,
+    "tender-intelligence": 0.7,
+    "financial-intelligence": 0.65,
+    "real-estate-automation": 0.6,
+    "indian-smb-workflows": 0.55
+  }
+}

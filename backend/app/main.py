@@ -7,8 +7,10 @@ from enum import StrEnum
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
+from app.catalog.taxonomy import TopicTaxonomyService, load_default_taxonomy
 from app.config import AppSettings, initialize_directories, load_settings
-from app.db import MigrationRunner, SQLiteDatabase
+from app.db import MigrationRunner, SQLiteDatabase, transaction
+from app.repositories import SQLiteRepositories
 
 
 class HealthStatus(StrEnum):
@@ -43,6 +45,15 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
             resolved_settings.database.busy_timeout_ms,
         )
         MigrationRunner(database).migrate()
+        connection = database.connect()
+        try:
+            with transaction(connection):
+                TopicTaxonomyService(
+                    SQLiteRepositories.for_connection(connection).topics,
+                    load_default_taxonomy(),
+                ).seed()
+        finally:
+            connection.close()
         yield
 
     application = FastAPI(

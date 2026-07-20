@@ -24,6 +24,7 @@ from app.domain.models import (
     SourceFilter,
     SourceRecord,
     SourceRecordFilter,
+    Topic,
     Work,
     WorkAuthor,
     WorkFilter,
@@ -100,6 +101,12 @@ class CatalogIdentityRepository(Protocol):
         publication_year: int,
         fuzzy_title_threshold: float,
     ) -> tuple[str, ...]: ...
+
+
+class TopicRepository(Protocol):
+    def upsert(self, topic: Topic) -> CreateResult[Topic]: ...
+    def get_by_key(self, topic_key: str) -> Topic | None: ...
+    def list(self, *, active: bool | None = None) -> tuple[Topic, ...]: ...
 
 
 class DocumentRepository(Protocol):

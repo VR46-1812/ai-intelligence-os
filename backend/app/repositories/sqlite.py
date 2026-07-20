@@ -34,6 +34,7 @@ from app.domain.models import (
     SourceFilter,
     SourceRecord,
     SourceRecordFilter,
+    Topic,
     Work,
     WorkAuthor,
     WorkFilter,
@@ -557,6 +558,75 @@ class SQLiteCatalogIdentityRepository(_SQLiteRepository):
             ).ratio()
             >= fuzzy_title_threshold
         )
+
+
+class SQLiteTopicRepository(_SQLiteRepository):
+    _columns = "id, topic_key, display_name, parent_topic_id, description, active"
+
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> Topic:
+        return _model(
+            Topic,
+            {
+                "id": row["id"],
+                "topic_key": row["topic_key"],
+                "display_name": row["display_name"],
+                "parent_topic_id": row["parent_topic_id"],
+                "description": row["description"],
+                "active": bool(row["active"]),
+            },
+        )
+
+    def upsert(self, topic: Topic) -> CreateResult[Topic]:
+        self._require_transaction()
+        existing = self.get_by_key(topic.topic_key)
+        if existing is None:
+            self._execute_write(
+                f"INSERT INTO topics ({self._columns}) VALUES (?,?,?,?,?,?)",
+                (
+                    topic.id,
+                    topic.topic_key,
+                    topic.display_name,
+                    topic.parent_topic_id,
+                    topic.description,
+                    int(topic.active),
+                ),
+                "create topic",
+            )
+            return CreateResult(topic, True)
+
+        updated = topic.model_copy(update={"id": existing.id})
+        self._execute_write(
+            """UPDATE topics SET display_name=?, parent_topic_id=?, description=?, active=?
+            WHERE id=?""",
+            (
+                updated.display_name,
+                updated.parent_topic_id,
+                updated.description,
+                int(updated.active),
+                updated.id,
+            ),
+            "update topic",
+        )
+        return CreateResult(updated, False)
+
+    def get_by_key(self, topic_key: str) -> Topic | None:
+        row = self._fetchone(
+            f"SELECT {self._columns} FROM topics WHERE topic_key=?",
+            (topic_key,),
+            "get topic",
+        )
+        return None if row is None else self._from_row(row)
+
+    def list(self, *, active: bool | None = None) -> tuple[Topic, ...]:
+        clause = "" if active is None else " WHERE active=?"
+        parameters: list[object] = [] if active is None else [int(active)]
+        rows = self._fetchall(
+            f"SELECT {self._columns} FROM topics{clause} ORDER BY topic_key, id",
+            parameters,
+            "list topics",
+        )
+        return tuple(self._from_row(row) for row in rows)
 
 
 class SQLiteWorkVersionRepository(_SQLiteRepository):
@@ -1106,6 +1176,7 @@ class SQLiteRepositories:
     source_records: SQLiteSourceRecordRepository
     works: SQLiteWorkRepository
     catalog_identities: SQLiteCatalogIdentityRepository
+    topics: SQLiteTopicRepository
     work_versions: SQLiteWorkVersionRepository
     documents: SQLiteDocumentRepository
     rankings: SQLiteRankingRepository
@@ -1119,6 +1190,7 @@ class SQLiteRepositories:
             source_records=SQLiteSourceRecordRepository(connection),
             works=SQLiteWorkRepository(connection),
             catalog_identities=SQLiteCatalogIdentityRepository(connection),
+            topics=SQLiteTopicRepository(connection),
             work_versions=SQLiteWorkVersionRepository(connection),
             documents=SQLiteDocumentRepository(connection),
             rankings=SQLiteRankingRepository(connection),

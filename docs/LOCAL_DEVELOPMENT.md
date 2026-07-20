@@ -102,6 +102,13 @@ for conservative title/first-author/year matches or conflicting identifiers.
 Catalog writes share the caller's explicit SQLite transaction; connector
 fetching and a persistent review queue remain outside this slice.
 
+M1.4 packages taxonomy version `2026.1`, aligned with the priorities in
+`CONTEXT.md`. Application startup idempotently seeds its controlled hierarchy
+into SQLite. The validated taxonomy also exposes deterministic arXiv-category
+mappings and bounded per-topic user weights; unmapped categories resolve to the
+explicit `unknown` topic. No classification model or connector runs in this
+slice.
+
 Create a consistent online backup from the repository root after the database
 has been initialized:
 

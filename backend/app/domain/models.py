@@ -171,6 +171,15 @@ class WorkAuthor(DomainModel):
     is_corresponding: bool = False
 
 
+class Topic(DomainModel):
+    id: Identifier
+    topic_key: Identifier
+    display_name: NonEmptyText
+    parent_topic_id: str | None = None
+    description: NonEmptyText
+    active: bool = True
+
+
 class WorkVersion(DomainModel):
     id: Identifier
     work_id: Identifier
