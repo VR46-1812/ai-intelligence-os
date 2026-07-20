@@ -14,7 +14,7 @@ from app.catalog.identity import CatalogIdentityService, new_ulid, normalize_tit
 from app.catalog.taxonomy import TopicTaxonomyService, load_default_taxonomy
 from app.config import AppSettings, initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase, transaction
-from app.domain.models import JsonObject, PublicationStatus, Source, TrustTier, WorkType
+from app.domain.models import PublicationStatus, Source, TrustTier, WorkType
 from app.ingestion.contracts import (
     ConnectorPage,
     FetchWindow,
@@ -26,8 +26,9 @@ from app.ingestion.registry import SourceRegistry
 from app.ingestion.runner import IngestionRunner
 from app.ingestion.storage import RawPayloadStore
 from app.repositories import SQLiteRepositories
-from app.sources.arxiv import ARXIV_MINIMUM_REQUEST_INTERVAL_MS, ArxivConnector
+from app.sources.arxiv import ArxivConnector
 from app.sources.arxiv_ingestion import ArxivIngestionService, ArxivSyncResult
+from app.sources.catalog import upsert_arxiv_source
 
 
 class LiveDemoError(RuntimeError):
@@ -177,42 +178,12 @@ async def _run_live(
 ) -> None:
     if not settings.sources.arxiv_enabled:
         raise RuntimeError("live arXiv retrieval is disabled by AIOS_SOURCES__ARXIV_ENABLED")
-    source = repositories.sources.get_by_key("arxiv")
-    source_config: JsonObject = {"categories": list(settings.sources.arxiv_categories)}
     with transaction(connection):
-        if source is None:
-            source = repositories.sources.create(
-                Source(
-                    id=new_ulid(),
-                    source_key="arxiv",
-                    display_name="arXiv",
-                    trust_tier=TrustTier.A,
-                    base_url="https://export.arxiv.org",
-                    enabled=True,
-                    poll_interval_minutes=60,
-                    minimum_request_interval_ms=ARXIV_MINIMUM_REQUEST_INTERVAL_MS,
-                    connector_version=ArxivConnector.connector_version,
-                    config=source_config,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-        else:
-            source = repositories.sources.update(
-                source.model_copy(
-                    update={
-                        "display_name": "arXiv",
-                        "trust_tier": TrustTier.A,
-                        "base_url": "https://export.arxiv.org",
-                        "enabled": True,
-                        "poll_interval_minutes": 60,
-                        "minimum_request_interval_ms": ARXIV_MINIMUM_REQUEST_INTERVAL_MS,
-                        "connector_version": ArxivConnector.connector_version,
-                        "config": source_config,
-                        "updated_at": now,
-                    }
-                )
-            )
+        source = upsert_arxiv_source(
+            repositories.sources,
+            settings.sources,
+            now=now,
+        )
         taxonomy = TopicTaxonomyService(repositories.topics, load_default_taxonomy())
         taxonomy.seed()
 

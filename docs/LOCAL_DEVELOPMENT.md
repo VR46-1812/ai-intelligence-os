@@ -145,6 +145,24 @@ The live command uses the shared timeout, retry, response-size, concurrency, and
 minimum three-second arXiv request-spacing policies. It does not download paper
 documents or invoke a model.
 
+## Discovery control plane
+
+M2.3 exposes the same bounded discovery operations through local CLI commands
+and `/api/discovery` endpoints. From `backend/`:
+
+```powershell
+uv run python -m app.discovery.cli list-sources
+uv run python -m app.discovery.cli source-health arxiv
+uv run python -m app.discovery.cli sync arxiv --maximum-records 5 --lookback-hours 168
+uv run python -m app.discovery.cli show-run <run-id>
+```
+
+The corresponding API operations are `GET /api/discovery/sources`, `GET
+/api/discovery/sources/{source_key}/health`, `POST /api/discovery/sync`, and
+`GET /api/discovery/runs/{run_id}`. Sync requests are synchronous and bounded
+to one arXiv page, 1–25 records, and a 1–168 hour lookback. They retain all M2.1
+HTTP, provenance, concurrency, and persistence limits.
+
 Create a consistent online backup from the repository root after the database
 has been initialized:
 
