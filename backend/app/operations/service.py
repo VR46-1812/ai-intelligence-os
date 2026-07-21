@@ -34,6 +34,7 @@ from app.domain.models import (
     PipelineStatus,
     PipelineTriggerType,
 )
+from app.intelligence.service import IntelligenceOutputService
 from app.operations.cleanup import RetentionCleaner
 from app.operations.models import CleanupResult, DailyCounts, DailyRunResult, DailyRunStatus
 from app.ranking.engine import DeterministicRankingEngine
@@ -132,6 +133,7 @@ class ProductionDailyRunner:
             )
             with transaction(connection):
                 repositories.pipeline_runs.update(run)
+            IntelligenceOutputService(connection).assemble_daily_report()
             return DailyRunResult(
                 run_id=run.id,
                 status=run.status,

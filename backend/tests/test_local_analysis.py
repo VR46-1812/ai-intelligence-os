@@ -18,6 +18,8 @@ from app.analysis.service import ScoutAnalysisService
 from app.config import REPOSITORY_ROOT, AppSettings, PathSettings, initialize_directories
 from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.domain.models import AnalysisStatus, AnalysisType
+from app.intelligence.evaluation import evaluate_golden_set
+from app.intelligence.service import IntelligenceOutputService
 from app.repositories import SQLiteRepositories
 
 
@@ -212,6 +214,56 @@ def test_analysis_is_citation_verified_persisted_and_idempotent(
     assert "INPUT_DATA" not in serialized and str(settings.paths.data_root) not in serialized
 
 
+def test_model_ranking_signal_uses_neutral_fallback_then_verified_brief(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    scout = FakeScout([_brief()])
+    analysis = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+    intelligence = IntelligenceOutputService(connection, analysis)
+
+    fallback = intelligence.ranking_signals()[0]
+    asyncio.run(analysis.analyze("work", AnalysisType.FAST_BRIEF))
+    assisted = intelligence.ranking_signals()[0]
+
+    assert fallback.fallback is True and fallback.refinement == 0
+    assert assisted.fallback is False and assisted.evidence_ids == ("ev-1",)
+    assert -2.5 <= assisted.refinement <= 2.5
+
+
+def test_deep_dive_stages_publish_once_and_resume_from_cache(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    scout = FakeScout([_deep_dive()])
+    analysis = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+    intelligence = IntelligenceOutputService(connection, analysis)
+
+    result, progress = asyncio.run(intelligence.run_deep_dive("work"))
+    cached, cached_progress = asyncio.run(intelligence.run_deep_dive("work"))
+
+    assert result.status is AnalysisStatus.SUCCEEDED
+    assert progress.status == "succeeded"
+    assert [stage.status for stage in progress.stages] == ["succeeded"] * 5
+    assert cached.id == result.id and cached_progress.job_id == progress.job_id
+    assert intelligence.progress_for_analysis(result.id) == progress
+    assert scout.calls == 1
+
+
+def test_golden_output_and_ranking_evaluation_meets_versioned_thresholds() -> None:
+    scores = evaluate_golden_set()
+
+    assert scores.version == "1.0.0" and scores.examples == 50
+    assert scores.completeness == 1 and scores.citation_coverage == 0.9
+    assert scores.repetition_rate == 0 and scores.unsupported_rejection == 1
+    assert scores.precision_at_10 == 1 and scores.ndcg_at_10 == 1
+    assert scores.passed is True
+
+
 def test_invalid_or_unsupported_output_gets_exactly_one_repair(
     analysis_store: tuple[AppSettings, sqlite3.Connection],
 ) -> None:
@@ -351,6 +403,17 @@ class TrackingTransport(httpx.AsyncBaseTransport):
         )
 
 
+class GrammarFallbackTransport(TrackingTransport):
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path != "/api/generate":
+            return await super().handle_async_request(request)
+        payload = json.loads(request.content)
+        self.payloads.append(payload)
+        if payload["format"] != "json":
+            return httpx.Response(400, json={"error": "failed to parse grammar"})
+        return httpx.Response(200, json={"response": "{}", "eval_count": 1})
+
+
 def test_ollama_client_is_local_bounded_sequential_and_unloadable(
     analysis_store: tuple[AppSettings, sqlite3.Connection],
 ) -> None:
@@ -387,3 +450,26 @@ def test_ollama_client_is_local_bounded_sequential_and_unloadable(
             generation_semaphore=asyncio.Semaphore(1),
             resources=settings.resources,
         )
+
+
+def test_ollama_client_falls_back_to_json_mode_for_unsupported_schema_grammar(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings = analysis_store[0]
+    transport = GrammarFallbackTransport()
+
+    async def exercise() -> None:
+        async with httpx.AsyncClient(transport=transport) as client:
+            await OllamaClient(
+                client,
+                base_url="http://127.0.0.1:11434",
+                generation_semaphore=asyncio.Semaphore(1),
+                resources=settings.resources,
+            ).generate(prompt="deep", schema={"type": "object"}, profile=settings.models.scout)
+
+    asyncio.run(exercise())
+    assert [payload["format"] for payload in transport.payloads] == [
+        {"type": "object"},
+        "json",
+    ]
+    assert "REQUIRED_JSON_SCHEMA" in str(transport.payloads[1]["prompt"])

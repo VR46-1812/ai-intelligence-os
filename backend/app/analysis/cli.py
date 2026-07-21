@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 from collections.abc import Sequence
 
 import httpx
@@ -13,6 +14,7 @@ from app.analysis.service import ScoutAnalysisService
 from app.config import initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase
 from app.domain.models import AnalysisType
+from app.intelligence.service import IntelligenceOutputService
 from app.repositories import SQLiteRepositories
 
 
@@ -48,6 +50,17 @@ async def _run(work_id: str | None, analysis_type: AnalysisType) -> str:
                 if not ranked:
                     raise RuntimeError("No ranked paper is available for local analysis.")
                 selected = ranked[0][0]
+            if analysis_type is AnalysisType.DEEP_DIVE:
+                result, progress = await IntelligenceOutputService(
+                    connection, service
+                ).run_deep_dive(selected)
+                return json.dumps(
+                    {
+                        "result": result.model_dump(mode="json"),
+                        "progress": progress.model_dump(mode="json"),
+                    },
+                    indent=2,
+                )
             result = await service.analyze(selected, analysis_type)
             return result.model_dump_json(indent=2)
         finally:

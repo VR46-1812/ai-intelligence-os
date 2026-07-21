@@ -146,6 +146,18 @@ class OllamaClient:
         try:
             async with self._generation_semaphore:
                 response = await self._client.post(f"{self._base_url}/api/generate", json=payload)
+                if response.status_code == 400 and "parse grammar" in response.text.casefold():
+                    # Ollama's grammar compiler supports less JSON Schema than Pydantic.
+                    # JSON mode still constrains syntax; typed validation remains authoritative.
+                    payload["format"] = "json"
+                    payload["prompt"] = (
+                        prompt
+                        + "\nREQUIRED_JSON_SCHEMA:\n"
+                        + json.dumps(schema, separators=(",", ":"), ensure_ascii=True)
+                    )
+                    response = await self._client.post(
+                        f"{self._base_url}/api/generate", json=payload
+                    )
                 response.raise_for_status()
                 result = response.json()
         except httpx.TimeoutException as error:

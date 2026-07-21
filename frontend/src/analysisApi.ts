@@ -88,6 +88,14 @@ export interface AnalysisResult {
   readonly created_at: string;
 }
 
+export interface DeepDiveProgress {
+  readonly job_id: string;
+  readonly work_id: string;
+  readonly status: string;
+  readonly analysis_run_id: string | null;
+  readonly stages: readonly { readonly key: string; readonly order: number; readonly status: string; readonly error_code: string | null }[];
+}
+
 export interface TodayReport {
   readonly report_date: string;
   readonly model: ModelStatus;
@@ -192,6 +200,16 @@ export async function fetchAnalysis(fetcher: typeof fetch, base: string, id: str
   const payload = await json(await fetcher(`${base}/analyses/${encodeURIComponent(id)}`, { signal, headers: { Accept: "application/json" } }));
   if (!isAnalysis(payload)) throw new AnalysisApiError("The stored analysis response was invalid.");
   return payload;
+}
+
+export async function fetchAnalysisProgress(fetcher: typeof fetch, base: string, id: string, signal: AbortSignal): Promise<DeepDiveProgress> {
+  const payload = await json(await fetcher(`${base}/analyses/${encodeURIComponent(id)}/progress`, { signal, headers: { Accept: "application/json" } }));
+  if (!isRecord(payload) || typeof payload.job_id !== "string" || typeof payload.work_id !== "string" ||
+      typeof payload.status !== "string" || !Array.isArray(payload.stages) || !payload.stages.every((stage) =>
+        isRecord(stage) && typeof stage.key === "string" && typeof stage.order === "number" && typeof stage.status === "string")) {
+    throw new AnalysisApiError("Deep-dive progress was invalid.");
+  }
+  return payload as unknown as DeepDiveProgress;
 }
 
 export async function retryAnalysis(fetcher: typeof fetch, base: string, id: string): Promise<AnalysisResult> {

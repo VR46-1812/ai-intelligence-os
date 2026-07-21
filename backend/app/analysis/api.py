@@ -17,6 +17,7 @@ from app.analysis.service import AnalysisServiceError, ScoutAnalysisService
 from app.config import AppSettings
 from app.db import SQLiteDatabase
 from app.domain.models import AnalysisType
+from app.intelligence.service import IntelligenceOutputService
 from app.repositories import SQLiteRepositories
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ EntityId = Annotated[str, Path(min_length=1, max_length=255)]
 
 
 @asynccontextmanager
-async def _service(request: Request) -> AsyncGenerator[ScoutAnalysisService]:
+async def analysis_service(request: Request) -> AsyncGenerator[ScoutAnalysisService]:
     settings: AppSettings = request.app.state.settings
     database: SQLiteDatabase = request.app.state.database
     timeout = httpx.Timeout(
@@ -79,7 +80,7 @@ async def scout_status(request: Request) -> ModelStatus:
 @router.post("/items/{work_id}/brief", response_model=AnalysisResult)
 async def generate_brief(work_id: EntityId, request: Request) -> AnalysisResult:
     try:
-        async with _service(request) as service:
+        async with analysis_service(request) as service:
             return await service.analyze(work_id, AnalysisType.FAST_BRIEF)
     except AnalysisServiceError as error:
         raise _safe_failure(error) from error
@@ -94,8 +95,11 @@ async def generate_brief(work_id: EntityId, request: Request) -> AnalysisResult:
 @router.post("/items/{work_id}/deep-dive", response_model=AnalysisResult)
 async def generate_deep_dive(work_id: EntityId, request: Request) -> AnalysisResult:
     try:
-        async with _service(request) as service:
-            return await service.analyze(work_id, AnalysisType.DEEP_DIVE)
+        async with analysis_service(request) as service:
+            result, _ = await IntelligenceOutputService(service.connection, service).run_deep_dive(
+                work_id
+            )
+            return result
     except AnalysisServiceError as error:
         raise _safe_failure(error) from error
     except Exception as error:
@@ -108,7 +112,7 @@ async def generate_deep_dive(work_id: EntityId, request: Request) -> AnalysisRes
 
 @router.get("/analyses/{analysis_id}", response_model=AnalysisResult)
 async def analysis_detail(analysis_id: EntityId, request: Request) -> AnalysisResult:
-    async with _service(request) as service:
+    async with analysis_service(request) as service:
         result = service.get_analysis(analysis_id)
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found.")
@@ -118,7 +122,13 @@ async def analysis_detail(analysis_id: EntityId, request: Request) -> AnalysisRe
 @router.post("/analyses/{analysis_id}/retry", response_model=AnalysisResult)
 async def retry_analysis(analysis_id: EntityId, request: Request) -> AnalysisResult:
     try:
-        async with _service(request) as service:
+        async with analysis_service(request) as service:
+            existing = service.get_analysis(analysis_id)
+            if existing is not None and existing.analysis_type is AnalysisType.DEEP_DIVE:
+                result, _ = await IntelligenceOutputService(
+                    service.connection, service
+                ).run_deep_dive(existing.work_id)
+                return result
             return await service.retry_analysis(analysis_id)
     except AnalysisServiceError as error:
         raise _safe_failure(error) from error
@@ -132,7 +142,7 @@ async def retry_analysis(analysis_id: EntityId, request: Request) -> AnalysisRes
 
 async def _today_report(request: Request, *, generate_limit: int = 0) -> TodayReport:
     settings: AppSettings = request.app.state.settings
-    async with _service(request) as service:
+    async with analysis_service(request) as service:
         rows = service.ranked_today(10)
         for work_id, _, _ in rows[:generate_limit]:
             await service.analyze(work_id, AnalysisType.FAST_BRIEF)

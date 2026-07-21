@@ -24,7 +24,7 @@ from app.analysis.models import (
 )
 from app.analysis.ollama import OllamaError, ScoutGenerator
 from app.catalog.identity import new_ulid
-from app.config import AppSettings
+from app.config import AppSettings, GenerationModelProfile
 from app.db import transaction
 from app.domain.models import (
     AnalysisRun,
@@ -91,20 +91,25 @@ class ScoutAnalysisService:
         self._settings = settings
         self._clock = clock
 
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """Expose the request-scoped connection to composed local services."""
+        return self._connection
+
     async def analyze(self, work_id: str, analysis_type: AnalysisType) -> AnalysisResult:
         if analysis_type not in {AnalysisType.FAST_BRIEF, AnalysisType.DEEP_DIVE}:
             raise AnalysisServiceError("UNSUPPORTED_ANALYSIS", "This analysis type is unavailable.")
         work = self._load_work(work_id)
         prompt_key = analysis_type.value
         template = self._load_prompt(prompt_key)
+        profile = self._profile(analysis_type)
         prompt_hash = hashlib.sha256(template.encode()).hexdigest()
         evidence_fingerprint = "|".join(item.sha256 for item in work.evidence)
         fingerprint = hashlib.sha256(
             (
                 f"{analysis_type.value}|{work.version_id}|{evidence_fingerprint}|{prompt_hash}|"
-                f"{self._settings.models.scout.model}|"
-                f"{self._settings.models.scout.maximum_context_tokens}|"
-                f"{self._settings.models.scout.maximum_output_tokens}"
+                f"{profile.model}|{profile.maximum_context_tokens}|"
+                f"{profile.maximum_output_tokens}"
             ).encode()
         ).hexdigest()
         now = self._clock()
@@ -114,6 +119,7 @@ class ScoutAnalysisService:
             prompt_key,
             prompt_hash,
             now,
+            profile,
         )
         existing = self._find_existing(
             analysis_type, fingerprint, model_profile_id, prompt_version_id
@@ -148,7 +154,7 @@ class ScoutAnalysisService:
             self._repositories.analyses.update(running)
         started = time.monotonic()
         try:
-            report = await self._generate_validated(work, analysis_type, template)
+            report = await self._generate_validated(work, analysis_type, template, profile)
             coverage, verified = self._verify_report(report, work)
             duration_ms = max(0, int((time.monotonic() - started) * 1000))
             output = cast(JsonObject, report.model_dump(mode="json"))
@@ -262,7 +268,11 @@ class ScoutAnalysisService:
         return await self._generator.status(self._settings.models.scout.model)
 
     async def _generate_validated(
-        self, work: WorkInput, analysis_type: AnalysisType, template: str
+        self,
+        work: WorkInput,
+        analysis_type: AnalysisType,
+        template: str,
+        profile: GenerationModelProfile,
     ) -> FastBrief | DeepDiveReport:
         model_type: type[FastBrief] | type[DeepDiveReport] = (
             FastBrief if analysis_type is AnalysisType.FAST_BRIEF else DeepDiveReport
@@ -271,7 +281,7 @@ class ScoutAnalysisService:
         first = await self._generator.generate(
             prompt=prompt,
             schema=cast(dict[str, object], model_type.model_json_schema()),
-            profile=self._settings.models.scout,
+            profile=profile,
         )
         try:
             report = model_type.model_validate_json(first.response_text)
@@ -296,7 +306,7 @@ class ScoutAnalysisService:
             repaired = await self._generator.generate(
                 prompt=repair_prompt,
                 schema=cast(dict[str, object], model_type.model_json_schema()),
-                profile=self._settings.models.scout,
+                profile=profile,
             )
             report = model_type.model_validate_json(repaired.response_text)
             self._validate_output_quality(report, work)
@@ -476,11 +486,12 @@ class ScoutAnalysisService:
         prompt_key: str,
         prompt_hash: str,
         now: datetime,
+        profile: GenerationModelProfile,
     ) -> tuple[str, str]:
         generation_config = json.dumps(
             {
-                "temperature": self._settings.models.scout.temperature,
-                "maximum_output_tokens": self._settings.models.scout.maximum_output_tokens,
+                "temperature": profile.temperature,
+                "maximum_output_tokens": profile.maximum_output_tokens,
                 "keep_alive_seconds": 0,
             },
             sort_keys=True,
@@ -498,9 +509,9 @@ class ScoutAnalysisService:
                     model_id,
                     "scout",
                     "ollama",
-                    self._settings.models.scout.model,
+                    profile.model,
                     "runtime-reported",
-                    self._settings.models.scout.maximum_context_tokens,
+                    profile.maximum_context_tokens,
                     generation_config,
                     1,
                     now.isoformat(),
@@ -532,6 +543,22 @@ class ScoutAnalysisService:
                 status_code=500,
             )
         return str(model_row["id"]), str(prompt_row["id"])
+
+    def _profile(self, analysis_type: AnalysisType) -> GenerationModelProfile:
+        if analysis_type is AnalysisType.FAST_BRIEF:
+            return self._settings.models.scout
+        return self._settings.models.scout.model_copy(
+            update={
+                "maximum_context_tokens": min(
+                    self._settings.models.analyst.maximum_context_tokens,
+                    self._settings.token_limits.maximum_context_tokens,
+                ),
+                "maximum_output_tokens": min(
+                    self._settings.models.analyst.maximum_output_tokens,
+                    self._settings.token_limits.maximum_output_tokens,
+                ),
+            }
+        )
 
     def _find_existing(
         self, analysis_type: AnalysisType, fingerprint: str, model_id: str, prompt_id: str

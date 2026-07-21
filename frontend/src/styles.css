@@ -6,6 +6,27 @@
   text-rendering: optimizeLegibility;
 }
 
+.intelligence-page { padding: 34px clamp(20px, 4vw, 56px) 64px; }
+.page-intro { max-width: 760px; margin-bottom: 28px; }
+.page-intro h2 { font-size: clamp(2rem, 4vw, 3.3rem); margin: 5px 0 10px; }
+.page-intro > p:last-child { color: var(--muted); line-height: 1.7; }
+.topic-grid, .opportunity-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 18px; }
+.intelligence-card { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; padding: 22px; box-shadow: 0 16px 44px rgba(4, 13, 25, .2); }
+.intelligence-card > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+.intelligence-card h3 { margin: 5px 0 10px; }
+.intelligence-card > p { color: var(--muted); line-height: 1.6; }
+.intelligence-card ol { list-style: none; padding: 0; margin: 18px 0 0; }
+.intelligence-card li { display: grid; grid-template-columns: 1fr auto; gap: 12px; padding: 11px 0; border-top: 1px solid var(--border); }
+.intelligence-card li a, .source-paper { color: var(--text); text-decoration: none; line-height: 1.35; }
+.intelligence-card li strong { color: var(--cyan); font-variant-numeric: tabular-nums; }
+.change-badge, .opportunity-kind { border: 1px solid rgba(48, 210, 190, .3); color: var(--cyan); background: rgba(48, 210, 190, .08); border-radius: 99px; padding: 5px 9px; font-size: .75rem; white-space: nowrap; }
+.opportunity-kind.commercial { border-color: rgba(168, 130, 255, .35); color: #bca1ff; background: rgba(168, 130, 255, .09); }
+.opportunity .source-paper { display: inline-block; margin: 10px 0; color: var(--cyan); }
+.stage-row { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.stage-row span { border: 1px solid var(--border); border-radius: 99px; padding: 5px 8px; font-size: .7rem; text-transform: capitalize; }
+.stage-row .succeeded { color: var(--cyan); border-color: rgba(48, 210, 190, .3); }
+.stage-row .failed, .stage-row .rejected { color: #ff938c; border-color: rgba(255, 113, 104, .35); }
+
 * {
   box-sizing: border-box;
 }

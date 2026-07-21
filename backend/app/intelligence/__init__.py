@@ -1,0 +1,1 @@
+"""Verified intelligence-output assembly."""

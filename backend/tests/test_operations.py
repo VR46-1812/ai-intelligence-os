@@ -69,6 +69,14 @@ def test_daily_runner_persists_counts_and_safe_failure(
     assert result.status is PipelineStatus.SUCCEEDED
     assert result.counts == DailyCounts(fetched=5, normalized=4, works_ranked=4, briefs_generated=1)
     assert status.latest_success_at == NOW and status.latest_run == result
+    connection = database.connect()
+    try:
+        report = connection.execute(
+            "SELECT report_json FROM daily_reports WHERE report_date='2026-07-21'"
+        ).fetchone()
+        assert report is not None and '"schema_version":"1.0"' in str(report[0])
+    finally:
+        connection.close()
 
     async def failure(*_: object) -> DailyCounts:
         raise RuntimeError("private path D:/secret and SQL SELECT")

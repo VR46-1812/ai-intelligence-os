@@ -86,6 +86,7 @@ for the highest-ranked stored paper:
 ```powershell
 Set-Location D:\Rujay\ai-intelligence-os\backend
 uv run python -m app.analysis.cli brief
+uv run python -m app.analysis.cli deep-dive
 ```
 
 Pass `--work-id <id>` to select a paper or replace `brief` with `deep-dive`.
@@ -119,6 +120,11 @@ uv run python -m app.operations.cli run-now
 uv run python -m app.operations.cli status
 uv run python -m app.operations.cli cleanup       # dry run
 uv run python -m app.operations.cli cleanup --apply
+
+The deep-dive command uses `qwen3:4b` on demand and persists resumable
+`extract -> analyze -> skeptic_check -> verify_citations -> publish` stages. The daily run
+assembles the versioned report returned by `GET /reports/daily/complete`. Ranked topic and
+verified opportunity views are available at `#topics` and `#opportunities`.
 ```
 
 The ordered path is arXiv sync and normalization, PDF acquisition and extraction, deterministic

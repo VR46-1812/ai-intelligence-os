@@ -17,6 +17,7 @@ from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.discovery.api import public_router as public_discovery_router
 from app.discovery.api import router as discovery_router
 from app.documents.api import router as documents_router
+from app.intelligence.api import router as intelligence_router
 from app.operations.api import router as operations_router
 from app.operations.scheduler import DailyScheduler
 from app.operations.service import ProductionDailyRunner
@@ -112,6 +113,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.include_router(documents_router)
     application.include_router(ranking_router)
     application.include_router(analysis_router)
+    application.include_router(intelligence_router)
     application.include_router(operations_router)
 
     return application

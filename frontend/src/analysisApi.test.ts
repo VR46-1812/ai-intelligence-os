@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchAnalysis, fetchModelStatus, fetchToday, generateAnalysis, retryAnalysis } from "./analysisApi";
+import { fetchAnalysis, fetchAnalysisProgress, fetchModelStatus, fetchToday, generateAnalysis, retryAnalysis } from "./analysisApi";
 
 const model = {
   runtime: "ollama",
@@ -63,5 +63,14 @@ describe("local analysis API", () => {
   it("surfaces only safe API error details", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ detail: "The configured daily local-analysis limit has been reached." }, 429));
     await expect(generateAnalysis(fetcher, "/api", "work-1", "brief")).rejects.toThrow("daily local-analysis limit");
+  });
+
+  it("reads persisted deep-dive publication stages", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({
+      job_id: "job", work_id: "work-1", status: "succeeded", analysis_run_id: "analysis-1",
+      stages: [{ key: "publish", order: 5, status: "succeeded", error_code: null }],
+    }));
+    const progress = await fetchAnalysisProgress(fetcher, "/api", "analysis-1", new AbortController().signal);
+    expect(progress.stages[0]?.key).toBe("publish");
   });
 });

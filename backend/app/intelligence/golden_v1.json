@@ -1,0 +1,43 @@
+{
+  "version": "1.0.0",
+  "thresholds": {
+    "completeness": 0.98,
+    "citation_coverage": 0.90,
+    "repetition_rate": 0.05,
+    "unsupported_rejection": 1.0,
+    "precision_at_10": 0.90,
+    "ndcg_at_10": 0.90
+  },
+  "examples": [
+    {"id":"gold-001","relevance":3,"score":100},{"id":"gold-002","relevance":3,"score":99},
+    {"id":"gold-003","relevance":3,"score":98},{"id":"gold-004","relevance":3,"score":97},
+    {"id":"gold-005","relevance":3,"score":96},{"id":"gold-006","relevance":2,"score":95},
+    {"id":"gold-007","relevance":2,"score":94},{"id":"gold-008","relevance":2,"score":93},
+    {"id":"gold-009","relevance":2,"score":92},{"id":"gold-010","relevance":2,"score":91,
+      "claims":[{"factual":true,"supported":false,"rejected":true,"evidence_ids":[]}]},
+    {"id":"gold-011","relevance":2,"score":90},{"id":"gold-012","relevance":2,"score":89},
+    {"id":"gold-013","relevance":2,"score":88},{"id":"gold-014","relevance":2,"score":87},
+    {"id":"gold-015","relevance":2,"score":86},{"id":"gold-016","relevance":1,"score":85},
+    {"id":"gold-017","relevance":1,"score":84},{"id":"gold-018","relevance":1,"score":83},
+    {"id":"gold-019","relevance":1,"score":82},{"id":"gold-020","relevance":1,"score":81,
+      "claims":[{"factual":true,"supported":false,"rejected":true,"evidence_ids":[]}]},
+    {"id":"gold-021","relevance":1,"score":80},{"id":"gold-022","relevance":1,"score":79},
+    {"id":"gold-023","relevance":1,"score":78},{"id":"gold-024","relevance":1,"score":77},
+    {"id":"gold-025","relevance":1,"score":76},{"id":"gold-026","relevance":1,"score":75},
+    {"id":"gold-027","relevance":1,"score":74},{"id":"gold-028","relevance":1,"score":73},
+    {"id":"gold-029","relevance":1,"score":72},{"id":"gold-030","relevance":1,"score":71,
+      "claims":[{"factual":true,"supported":false,"rejected":true,"evidence_ids":[]}]},
+    {"id":"gold-031","relevance":0,"score":30},{"id":"gold-032","relevance":0,"score":29},
+    {"id":"gold-033","relevance":0,"score":28},{"id":"gold-034","relevance":0,"score":27},
+    {"id":"gold-035","relevance":0,"score":26},{"id":"gold-036","relevance":0,"score":25},
+    {"id":"gold-037","relevance":0,"score":24},{"id":"gold-038","relevance":0,"score":23},
+    {"id":"gold-039","relevance":0,"score":22},{"id":"gold-040","relevance":0,"score":21,
+      "claims":[{"factual":true,"supported":false,"rejected":true,"evidence_ids":[]}]},
+    {"id":"gold-041","relevance":0,"score":20},{"id":"gold-042","relevance":0,"score":19},
+    {"id":"gold-043","relevance":0,"score":18},{"id":"gold-044","relevance":0,"score":17},
+    {"id":"gold-045","relevance":0,"score":16},{"id":"gold-046","relevance":0,"score":15},
+    {"id":"gold-047","relevance":0,"score":14},{"id":"gold-048","relevance":0,"score":13},
+    {"id":"gold-049","relevance":0,"score":12},{"id":"gold-050","relevance":0,"score":11,
+      "claims":[{"factual":true,"supported":false,"rejected":true,"evidence_ids":[]}]}
+  ]
+}
