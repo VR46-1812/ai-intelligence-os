@@ -15,6 +15,7 @@ import {
   syncLatestResearch,
   type SyncResult,
 } from "./catalogApi";
+import { AnalysisApiError, generateAnalysis, type AnalysisResult } from "./analysisApi";
 
 const PAGE_SIZE = 5;
 const EMPTY_FILTERS: CatalogFilterOptions = { topics: [], sources: [] };
@@ -82,6 +83,7 @@ function LoadingCards() {
 }
 
 interface PaperDetailProps {
+  readonly apiBaseUrl: string;
   readonly paper: CatalogPaper | null;
   readonly state: "loading" | "ready" | "error";
   readonly onClose: () => void;
@@ -89,7 +91,29 @@ interface PaperDetailProps {
   readonly evidenceState: "loading" | "ready" | "error";
 }
 
-function PaperDetail({ paper, state, onClose, evidence, evidenceState }: PaperDetailProps) {
+function PaperDetail({ apiBaseUrl, paper, state, onClose, evidence, evidenceState }: PaperDetailProps) {
+  const [analysisState, setAnalysisState] = useState<"idle" | "brief" | "deep-dive" | "error">("idle");
+  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+
+  async function runAnalysis(type: "brief" | "deep-dive") {
+    if (!paper) return;
+    setAnalysisState(type);
+    setAnalysisError(null);
+    try {
+      const result = await generateAnalysis(fetch, apiBaseUrl, paper.id, type);
+      setAnalysis(result);
+      if (result.status === "failed") {
+        setAnalysisError(result.safe_detail ?? "Scout analysis failed safely.");
+        setAnalysisState("error");
+      } else {
+        setAnalysisState("idle");
+      }
+    } catch (reason) {
+      setAnalysisError(reason instanceof AnalysisApiError ? reason.message : "Scout analysis failed safely.");
+      setAnalysisState("error");
+    }
+  }
   return (
     <aside className="detail-panel" aria-label="Paper detail" aria-live="polite">
       <button className="detail-close" type="button" onClick={onClose} aria-label="Close paper detail">
@@ -167,6 +191,17 @@ function PaperDetail({ paper, state, onClose, evidence, evidenceState }: PaperDe
                 })}
               </div>
             )}
+          </section>
+          <section className="analysis-actions" aria-labelledby="analysis-actions-heading">
+            <p className="eyebrow" id="analysis-actions-heading">Local Scout</p>
+            <p className="muted-copy">Generate only from the evidence stored above. The model unloads after completion.</p>
+            <div>
+              <button type="button" disabled={analysisState === "brief" || analysisState === "deep-dive"} onClick={() => void runAnalysis("brief")}>{analysisState === "brief" ? "Generating brief…" : "Generate brief"}</button>
+              <button className="primary-analysis" type="button" disabled={analysisState === "brief" || analysisState === "deep-dive"} onClick={() => void runAnalysis("deep-dive")}>{analysisState === "deep-dive" ? "Building deep dive…" : "Run deep dive"}</button>
+            </div>
+            {analysisError && <p className="evidence-warning" role="alert">{analysisError}</p>}
+            {analysis?.output && "change" in analysis.output && <article className="generated-brief"><strong>{analysis.output.change}</strong><p>{analysis.output.contribution}</p><span>{Math.round(analysis.citation_coverage * 100)}% citations verified · {analysis.cached ? "cached" : `${(analysis.duration_ms ?? 0) / 1000}s`}</span></article>}
+            {analysis?.output && "title" in analysis.output && <a className="primary-link" href={`#report/${encodeURIComponent(analysis.id)}`}>Open verified deep dive →</a>}
           </section>
           {safeExternalUrl(paper.external_url) && (
             <a
@@ -479,7 +514,7 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
             </nav>
           )}
         </div>
-        {selectedId && <PaperDetail paper={detail} state={detailState} onClose={closeDetail} evidence={evidence} evidenceState={evidenceState} />}
+        {selectedId && <PaperDetail apiBaseUrl={apiBaseUrl} paper={detail} state={detailState} onClose={closeDetail} evidence={evidence} evidenceState={evidenceState} />}
       </section>
     </main>
   );

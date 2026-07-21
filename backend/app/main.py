@@ -9,6 +9,7 @@ from enum import StrEnum
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
+from app.analysis.api import router as analysis_router
 from app.catalog.api import router as catalog_router
 from app.catalog.taxonomy import TopicTaxonomyService, load_default_taxonomy
 from app.config import AppSettings, initialize_directories, load_settings
@@ -76,6 +77,9 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.state.settings = resolved_settings
     application.state.database = database
     application.state.discovery_sync_lock = asyncio.Lock()
+    application.state.llm_generation_semaphore = asyncio.Semaphore(
+        resolved_settings.resources.llm_generation_concurrency
+    )
 
     application.add_api_route(
         "/health",
@@ -89,6 +93,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.include_router(catalog_router)
     application.include_router(documents_router)
     application.include_router(ranking_router)
+    application.include_router(analysis_router)
 
     return application
 

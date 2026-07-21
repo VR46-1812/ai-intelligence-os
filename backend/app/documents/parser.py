@@ -8,10 +8,13 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
 import pymupdf
+
+from app.documents.ocr import OcrAdapter, OcrError
 
 _HEADING = re.compile(r"^(?:\d+(?:\.\d+)*\s+)?[A-Z][A-Za-z0-9 ,:()/-]{2,80}$")
 
@@ -34,20 +37,47 @@ class ParsedSpan:
     metadata: dict[str, int | str]
 
 
+class PageExtractionClass(StrEnum):
+    NATIVE_TEXT = "native_text"
+    EMPTY = "empty"
+    SUSPICIOUS = "suspicious"
+    OCR_REQUIRED = "ocr_required"
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedPage:
+    page: int
+    extraction_class: PageExtractionClass
+    native_character_count: int
+    image_count: int
+    extraction_method: str
+    detail: str | None = None
+
+
 @dataclass(frozen=True, slots=True)
 class ParsedPdf:
     page_count: int
     spans: tuple[ParsedSpan, ...]
     empty_pages: tuple[int, ...]
     partial: bool
+    pages: tuple[ParsedPage, ...]
 
 
 class PdfTextExtractor:
     parser_name = "PyMuPDF"
 
-    def __init__(self, *, maximum_pages: int = 500, maximum_page_characters: int = 100_000) -> None:
+    def __init__(
+        self,
+        *,
+        maximum_pages: int = 500,
+        maximum_page_characters: int = 100_000,
+        suspicious_native_characters: int = 40,
+        ocr: OcrAdapter | None = None,
+    ) -> None:
         self._maximum_pages = maximum_pages
         self._maximum_page_characters = maximum_page_characters
+        self._suspicious_native_characters = suspicious_native_characters
+        self._ocr = ocr
 
     def extract(self, path: Path) -> ParsedPdf:
         try:
@@ -61,13 +91,16 @@ class PdfTextExtractor:
             pages_to_read = min(page_count, self._maximum_pages)
             spans: list[ParsedSpan] = []
             empty_pages: list[int] = []
+            page_results: list[ParsedPage] = []
             section: str | None = None
             for page_index in range(pages_to_read):
                 try:
+                    page = document[page_index]
                     blocks = cast(
                         list[tuple[float, float, float, float, str, int, int]],
-                        document[page_index].get_text("blocks", sort=True),
+                        page.get_text("blocks", sort=True),
                     )
+                    image_count = len(page.get_images(full=True))
                 except RuntimeError as error:
                     raise PdfParseError(
                         "PAGE_EXTRACTION_FAILED", "A PDF page could not be extracted."
@@ -99,9 +132,76 @@ class PdfTextExtractor:
                     position += len(text) + 1
                 if not page_has_text:
                     empty_pages.append(page_index + 1)
+                    classification = (
+                        PageExtractionClass.OCR_REQUIRED
+                        if image_count > 0
+                        else PageExtractionClass.EMPTY
+                    )
+                    method = "none"
+                    detail = "No native text was extracted."
+                    if classification is PageExtractionClass.OCR_REQUIRED and self._ocr:
+                        try:
+                            ocr_text = self._ocr.extract_png(
+                                page.get_pixmap(dpi=150).tobytes("png")
+                            )
+                        except OcrError:
+                            detail = "Optional OCR failed; no text was invented."
+                        else:
+                            if ocr_text:
+                                normalized = " ".join(ocr_text.casefold().split())
+                                spans.append(
+                                    ParsedSpan(
+                                        page=page_index + 1,
+                                        char_start=0,
+                                        char_end=len(ocr_text),
+                                        text=ocr_text,
+                                        section_path=section,
+                                        normalized_sha256=hashlib.sha256(
+                                            normalized.encode()
+                                        ).hexdigest(),
+                                        metadata={
+                                            "block": 0,
+                                            "parser_order": len(spans),
+                                            "extraction_method": "tesseract",
+                                        },
+                                    )
+                                )
+                                method = "tesseract"
+                                detail = "OCR applied only after native-text extraction was empty."
+                    page_results.append(
+                        ParsedPage(
+                            page=page_index + 1,
+                            extraction_class=classification,
+                            native_character_count=0,
+                            image_count=image_count,
+                            extraction_method=method,
+                            detail=detail,
+                        )
+                    )
+                else:
+                    classification = (
+                        PageExtractionClass.SUSPICIOUS
+                        if position < self._suspicious_native_characters
+                        else PageExtractionClass.NATIVE_TEXT
+                    )
+                    page_results.append(
+                        ParsedPage(
+                            page=page_index + 1,
+                            extraction_class=classification,
+                            native_character_count=max(0, position - 1),
+                            image_count=image_count,
+                            extraction_method="pymupdf",
+                            detail=(
+                                "Native text volume is unusually low; OCR was not applied."
+                                if classification is PageExtractionClass.SUSPICIOUS
+                                else None
+                            ),
+                        )
+                    )
             return ParsedPdf(
                 page_count=page_count,
                 spans=tuple(spans),
                 empty_pages=tuple(empty_pages),
                 partial=page_count > self._maximum_pages or bool(empty_pages),
+                pages=tuple(page_results),
             )

@@ -5,5 +5,6 @@ export default defineConfig({
     environment: "node",
     include: ["src/**/*.test.ts"],
     clearMocks: true,
+    pool: "threads",
   },
 });

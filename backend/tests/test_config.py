@@ -47,6 +47,29 @@ def test_default_settings_encode_hard_resource_policy() -> None:
     assert settings.ollama.unload_after_generation is True
     assert settings.models.scout.keep_alive_seconds == 0
     assert settings.models.analyst.keep_alive_seconds == 0
+    assert settings.ocr.enabled is False
+    assert settings.ocr.suspicious_native_characters == 40
+
+
+def test_optional_ocr_configuration_is_typed_and_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AIOS_OCR__ENABLED", "true")
+    monkeypatch.setenv("AIOS_OCR__LANGUAGE", "eng+hin")
+    monkeypatch.setenv("AIOS_OCR__PAGE_TIMEOUT_SECONDS", "45")
+
+    settings = load_settings()
+
+    assert settings.ocr.enabled is True
+    assert settings.ocr.language == "eng+hin"
+    assert settings.ocr.page_timeout_seconds == 45
+
+
+def test_invalid_ocr_configuration_fails_safely(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AIOS_OCR__PAGE_TIMEOUT_SECONDS", "500")
+
+    with pytest.raises(ConfigurationError, match="page_timeout_seconds"):
+        load_settings()
 
 
 def test_arxiv_categories_default_to_the_phase_one_allowlist() -> None:

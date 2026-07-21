@@ -25,7 +25,7 @@ from app.config import REPOSITORY_ROOT, PathSettings, initialize_directories
 from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.documents.api import router as evidence_router
 from app.documents.download import DocumentDownloadError, SafePdfDownloader
-from app.documents.parser import PdfParseError, PdfTextExtractor
+from app.documents.parser import PageExtractionClass, PdfParseError, PdfTextExtractor
 from app.documents.service import DocumentProcessingService
 from app.ranking.engine import DeterministicRankingEngine
 from app.repositories import SQLiteRepositories
@@ -82,6 +82,16 @@ def document_store() -> Iterator[tuple[PathSettings, SQLiteDatabase, sqlite3.Con
         yield paths, database, connection
     finally:
         connection.close()
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.fixture
+def pdf_fixture_root() -> Iterator[Path]:
+    root = REPOSITORY_ROOT / "data" / ".test-pdfs" / uuid4().hex
+    root.mkdir(parents=True)
+    try:
+        yield root
+    finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -171,16 +181,20 @@ def test_downloader_streams_hashes_deduplicates_and_enforces_policy(
     asyncio.run(exercise())
 
 
-def test_parser_preserves_order_pages_empty_pages_and_safe_failures(tmp_path: Path) -> None:
-    path = tmp_path / "columns.pdf"
+def test_parser_preserves_order_pages_empty_pages_and_safe_failures(
+    pdf_fixture_root: Path,
+) -> None:
+    path = pdf_fixture_root / "columns.pdf"
     path.write_bytes(_pdf_bytes(empty_page=True))
     parsed = PdfTextExtractor().extract(path)
     assert parsed.page_count == 2 and parsed.empty_pages == (2,) and parsed.partial
+    assert parsed.pages[0].extraction_class is PageExtractionClass.NATIVE_TEXT
+    assert parsed.pages[1].extraction_class is PageExtractionClass.EMPTY
     assert [span.page for span in parsed.spans] == [1, 1, 1]
     assert "Left column" in parsed.spans[1].text
     assert "Right column" in parsed.spans[2].text
 
-    malformed = tmp_path / "malformed.pdf"
+    malformed = pdf_fixture_root / "malformed.pdf"
     malformed.write_bytes(b"%PDF-invalid")
     with pytest.raises(PdfParseError) as captured:
         PdfTextExtractor().extract(malformed)
@@ -188,7 +202,7 @@ def test_parser_preserves_order_pages_empty_pages_and_safe_failures(tmp_path: Pa
 
     encrypted = pymupdf.open()
     encrypted.new_page().insert_text((40, 40), "secret")
-    encrypted_path = tmp_path / "encrypted.pdf"
+    encrypted_path = pdf_fixture_root / "encrypted.pdf"
     encrypted.save(
         encrypted_path, encryption=pymupdf.PDF_ENCRYPT_AES_256, owner_pw="owner", user_pw="user"
     )
@@ -196,6 +210,46 @@ def test_parser_preserves_order_pages_empty_pages_and_safe_failures(tmp_path: Pa
     with pytest.raises(PdfParseError) as captured:
         PdfTextExtractor().extract(encrypted_path)
     assert captured.value.code == "ENCRYPTED_PDF"
+
+
+def test_ocr_triage_never_ocr_native_text_and_only_ocr_required_image_pages(
+    pdf_fixture_root: Path,
+) -> None:
+    class FakeOcr:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def extract_png(self, payload: bytes) -> str:
+            assert payload.startswith(b"\x89PNG")
+            self.calls += 1
+            return "OCR evidence from an image-only page."
+
+    document = pymupdf.open()
+    native = document.new_page()
+    native.insert_text(
+        (40, 40), "This native text is long enough to remain the primary extraction path."
+    )
+    image_page = document.new_page()
+    pixmap = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 20, 20), False)
+    pixmap.clear_with(255)
+    image_page.insert_image(image_page.rect, stream=pixmap.tobytes("png"))
+    suspicious = document.new_page()
+    suspicious.insert_text((40, 40), "Short")
+    path = pdf_fixture_root / "triage.pdf"
+    document.save(path)
+    document.close()
+    ocr = FakeOcr()
+
+    parsed = PdfTextExtractor(ocr=ocr).extract(path)
+
+    assert ocr.calls == 1
+    assert parsed.pages[0].extraction_class is PageExtractionClass.NATIVE_TEXT
+    assert parsed.pages[0].extraction_method == "pymupdf"
+    assert parsed.pages[1].extraction_class is PageExtractionClass.OCR_REQUIRED
+    assert parsed.pages[1].extraction_method == "tesseract"
+    assert parsed.pages[2].extraction_class is PageExtractionClass.SUSPICIOUS
+    assert parsed.pages[2].extraction_method == "pymupdf"
+    assert any(span.metadata.get("extraction_method") == "tesseract" for span in parsed.spans)
 
 
 def test_processing_persists_immutable_document_evidence_and_ranking(

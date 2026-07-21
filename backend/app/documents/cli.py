@@ -12,6 +12,7 @@ from app.catalog.taxonomy import load_default_taxonomy
 from app.config import initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase
 from app.documents.download import SafePdfDownloader
+from app.documents.ocr import TesseractAdapter
 from app.documents.parser import PdfTextExtractor
 from app.documents.service import DocumentProcessingService
 from app.ranking.engine import DeterministicRankingEngine
@@ -52,7 +53,19 @@ async def _process(limit: int) -> str:
                 SQLiteRepositories.for_connection(connection),
                 settings.paths,
                 downloader,
-                PdfTextExtractor(),
+                PdfTextExtractor(
+                    suspicious_native_characters=settings.ocr.suspicious_native_characters,
+                    ocr=(
+                        TesseractAdapter(
+                            executable=settings.ocr.tesseract_executable,
+                            temporary_root=settings.paths.temporary_root,
+                            language=settings.ocr.language,
+                            timeout_seconds=settings.ocr.page_timeout_seconds,
+                        )
+                        if settings.ocr.enabled
+                        else None
+                    ),
+                ),
             ).process(limit=limit)
             ranking = DeterministicRankingEngine(connection, load_default_taxonomy()).rank_catalog(
                 limit=100

@@ -78,6 +78,28 @@ Explore reads ranking and document state through `GET /items`, paper evidence th
 `GET /items/{id}/evidence`, and can replay the bounded deterministic rank stage with
 `POST /pipeline/rank?limit=100`.
 
+## Local Scout analysis
+
+With Ollama running and `qwen3:4b` installed, generate one citation-verified brief
+for the highest-ranked stored paper:
+
+```powershell
+Set-Location D:\Rujay\ai-intelligence-os\backend
+uv run python -m app.analysis.cli brief
+```
+
+Pass `--work-id <id>` to select a paper or replace `brief` with `deep-dive`.
+The client calls only the configured loopback Ollama URL, allows one generation at
+a time, enforces the Scout context/output limits, and sends `keep_alive=0` so the
+model can unload immediately. Successful identical inputs are served from SQLite.
+Model status is available at `GET /models/scout/status`; Today uses
+`GET /reports/today`; analysis mutations use `POST /items/{id}/brief` and
+`POST /items/{id}/deep-dive`; stored reports use `GET /analyses/{id}`.
+
+OCR remains disabled by default. When `AIOS_OCR__ENABLED=true`, only image-only
+pages classified as `ocr_required` may use the configured local Tesseract binary.
+Native-text and suspicious low-text pages remain on the PyMuPDF path.
+
 The Vite development server proxies `/api` requests to the local backend. To
 override the frontend API base path, copy `.env.example` to `.env` and update
 `VITE_API_BASE_URL`.

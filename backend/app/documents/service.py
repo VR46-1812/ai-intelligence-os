@@ -148,6 +148,22 @@ class DocumentProcessingService:
 
         status = ParseStatus.PARTIAL if parsed.partial else ParseStatus.PARSED
         with transaction(self._connection):
+            for page in parsed.pages:
+                self._connection.execute(
+                    """INSERT OR REPLACE INTO document_pages
+                    (document_id,page_number,extraction_class,native_character_count,image_count,
+                    extraction_method,detail,created_at) VALUES (?,?,?,?,?,?,?,?)""",
+                    (
+                        document.id,
+                        page.page,
+                        page.extraction_class.value,
+                        page.native_character_count,
+                        page.image_count,
+                        page.extraction_method,
+                        page.detail,
+                        self._clock().isoformat(),
+                    ),
+                )
             for span in parsed.spans:
                 self._connection.execute(
                     """INSERT OR IGNORE INTO evidence_spans

@@ -104,6 +104,18 @@ class DownloadSettings(BaseModel):
     checksum_algorithm: Literal["sha256"] = "sha256"
 
 
+class OcrSettings(BaseModel):
+    """Optional page-level OCR policy; native text always remains primary."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = False
+    tesseract_executable: str = Field(default="tesseract", min_length=1, max_length=260)
+    language: str = Field(default="eng", pattern=r"^[A-Za-z0-9_+-]{2,40}$")
+    page_timeout_seconds: int = Field(default=30, ge=5, le=120)
+    suspicious_native_characters: int = Field(default=40, ge=1, le=500)
+
+
 class DatabaseSettings(BaseModel):
     """Hard SQLite connection policy for the local persistence layer."""
 
@@ -320,6 +332,7 @@ class AppSettings(BaseSettings):
     paths: PathSettings = Field(default_factory=PathSettings)
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     downloads: DownloadSettings = Field(default_factory=DownloadSettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
     http: HttpSettings = Field(default_factory=HttpSettings)
     sources: SourceSettings = Field(default_factory=SourceSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)

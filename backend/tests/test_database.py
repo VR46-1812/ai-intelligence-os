@@ -79,7 +79,7 @@ def test_new_database_migrates_with_required_sqlite_features(database_path: Path
 
     applied = MigrationRunner(database).migrate()
 
-    assert [record.version for record in applied] == [1, 2, 3]
+    assert [record.version for record in applied] == [1, 2, 3, 4]
     connection = database.connect()
     try:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -102,6 +102,7 @@ def test_new_database_migrates_with_required_sqlite_features(database_path: Path
             "knowledge_fts",
             "evidence_fts",
             "document_acquisition_attempts",
+            "document_pages",
         } <= tables
 
         connection.execute(
@@ -126,11 +127,11 @@ def test_repeated_migration_is_idempotent(database_path: Path) -> None:
     first = runner.migrate()
     second = runner.migrate()
 
-    assert len(first) == 3
+    assert len(first) == 4
     assert second == ()
     connection = database.connect()
     try:
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 3
+        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 4
     finally:
         connection.close()
 
@@ -246,7 +247,7 @@ def test_previous_schema_fixture_migrates_without_data_loss(database_path: Path)
     database = _database(database_path)
     applied = MigrationRunner(database).migrate()
 
-    assert [record.version for record in applied] == [1, 2, 3]
+    assert [record.version for record in applied] == [1, 2, 3, 4]
     connection = database.connect()
     try:
         marker = connection.execute("SELECT marker FROM previous_release_marker").fetchone()[0]
