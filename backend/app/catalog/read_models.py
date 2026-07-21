@@ -86,6 +86,9 @@ class CatalogPaper(CatalogModel):
     abstract: str | None
     publication_status: PublicationStatus
     published_at: UtcDateTime | None
+    submitted_at: UtcDateTime | None
+    arxiv_announced_at: UtcDateTime | None
+    locally_ingested_at: UtcDateTime
     updated_at: UtcDateTime
     current_version: str
     authors: tuple[CatalogAuthor, ...]

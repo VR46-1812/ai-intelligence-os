@@ -12,6 +12,7 @@ from app.catalog.taxonomy import TopicTaxonomyService, load_default_taxonomy
 from app.config import AppSettings
 from app.db import transaction
 from app.discovery.models import DiscoverySyncRequest
+from app.domain.models import PipelineTriggerType
 from app.ingestion.http import BoundedHttpClient
 from app.ingestion.registry import SourceRegistry
 from app.ingestion.runner import IngestionRunner
@@ -45,11 +46,18 @@ class ArxivDiscoverySyncExecutor:
         self._sleep = sleep
         self._sync_lock = sync_lock if sync_lock is not None else asyncio.Lock()
 
-    async def sync(self, request: DiscoverySyncRequest) -> ArxivSyncResult:
+    async def sync(
+        self,
+        request: DiscoverySyncRequest,
+        *,
+        trigger: PipelineTriggerType = PipelineTriggerType.MANUAL,
+    ) -> ArxivSyncResult:
         async with self._sync_lock:
-            return await self._sync_once(request)
+            return await self._sync_once(request, trigger)
 
-    async def _sync_once(self, request: DiscoverySyncRequest) -> ArxivSyncResult:
+    async def _sync_once(
+        self, request: DiscoverySyncRequest, trigger: PipelineTriggerType
+    ) -> ArxivSyncResult:
         source = self._repositories.sources.get_by_key(request.source_key)
         if source is None:
             raise RuntimeError("arXiv source registration is missing")
@@ -114,6 +122,7 @@ class ArxivDiscoverySyncExecutor:
                 since=until - timedelta(hours=request.lookback_hours),
                 until=until,
                 page_size=request.maximum_records,
+                trigger=trigger,
             )
         finally:
             await http.aclose()

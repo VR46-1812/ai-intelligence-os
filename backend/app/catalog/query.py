@@ -52,6 +52,9 @@ _SORT_SQL = {
 
 _CATALOG_SELECT = """w.id, v.title, v.abstract, w.publication_status,
 COALESCE(v.published_at, w.first_published_at) AS publication_date,
+COALESCE(v.published_at, w.first_published_at) AS submitted_date,
+sr.updated_at_upstream AS arxiv_announced_date,
+sr.observed_at AS locally_ingested_date,
 w.updated_at, v.version_label, s.source_key, s.display_name,
 (SELECT d.parse_status FROM documents d WHERE d.work_version_id=v.id AND d.document_role='paper_pdf'
  ORDER BY d.acquired_at DESC,d.id DESC LIMIT 1) document_parse_status,
@@ -284,6 +287,9 @@ class SQLiteCatalogReadRepository:
                         "abstract": row["abstract"],
                         "publication_status": row["publication_status"],
                         "published_at": row["publication_date"],
+                        "submitted_at": row["submitted_date"],
+                        "arxiv_announced_at": row["arxiv_announced_date"],
+                        "locally_ingested_at": row["locally_ingested_date"],
                         "updated_at": row["updated_at"],
                         "current_version": row["version_label"],
                         "authors": tuple(authors[work_id]),

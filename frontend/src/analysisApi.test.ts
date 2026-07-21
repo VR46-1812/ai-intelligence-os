@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchAnalysis, fetchModelStatus, fetchToday, generateAnalysis } from "./analysisApi";
+import { fetchAnalysis, fetchModelStatus, fetchToday, generateAnalysis, retryAnalysis } from "./analysisApi";
 
 const model = {
   runtime: "ollama",
@@ -57,6 +57,7 @@ describe("local analysis API", () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(response(brief)));
     await expect(generateAnalysis(fetcher, "/api", "work-1", "brief")).resolves.toMatchObject({ citations_verified: 1 });
     await expect(fetchAnalysis(fetcher, "/api", "analysis-1", new AbortController().signal)).resolves.toMatchObject({ status: "succeeded" });
+    await expect(retryAnalysis(fetcher, "/api", "analysis-1")).resolves.toMatchObject({ id: "analysis-1" });
   });
 
   it("surfaces only safe API error details", async () => {

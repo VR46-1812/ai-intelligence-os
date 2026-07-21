@@ -285,6 +285,29 @@ class DailyWorkLimitSettings(BaseModel):
         return self
 
 
+class SchedulerSettings(BaseModel):
+    """Single-process local daily schedule and bounded funnel settings."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = True
+    timezone: str = Field(default="Asia/Kolkata", min_length=1, max_length=64)
+    hour: int = Field(default=6, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    maximum_records: int = Field(default=5, ge=1, le=25)
+    lookback_hours: int = Field(default=168, ge=1, le=168)
+    document_limit: int = Field(default=5, ge=1, le=25)
+    top_briefs: int = Field(default=1, ge=1, le=3)
+    missed_run_grace_hours: int = Field(default=24, ge=1, le=72)
+    poll_seconds: int = Field(default=60, ge=10, le=3600)
+
+    @model_validator(mode="after")
+    def validate_daily_limits(self) -> Self:
+        if self.top_briefs > 3:
+            raise ValueError("top_briefs cannot exceed the bounded daily automatic limit")
+        return self
+
+
 class ResourceBudgetSettings(BaseModel):
     """Hard laptop resource ceilings for all later runtime work."""
 
@@ -340,6 +363,7 @@ class AppSettings(BaseSettings):
     models: ModelProfileSettings = Field(default_factory=ModelProfileSettings)
     retention: RetentionSettings = Field(default_factory=RetentionSettings)
     daily_work: DailyWorkLimitSettings = Field(default_factory=DailyWorkLimitSettings)
+    scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     resources: ResourceBudgetSettings = Field(default_factory=ResourceBudgetSettings)
 
     @model_validator(mode="after")
@@ -355,6 +379,8 @@ class AppSettings(BaseSettings):
             if profile.maximum_output_tokens > self.token_limits.maximum_output_tokens:
                 msg = f"{profile_name} output exceeds token_limits.maximum_output_tokens"
                 raise ValueError(msg)
+        if self.scheduler.top_briefs > self.daily_work.maximum_fast_briefs:
+            raise ValueError("scheduler top_briefs exceeds maximum_fast_briefs")
         return self
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { AnalysisApiError, fetchAnalysis, type AnalysisResult, type ReportClaim } from "./analysisApi";
+import { AnalysisApiError, fetchAnalysis, retryAnalysis, type AnalysisResult, type ReportClaim } from "./analysisApi";
 
 interface ReportPageProps { readonly apiBaseUrl: string; readonly analysisId: string; }
 
@@ -15,6 +15,7 @@ function Claims({ claims }: { readonly claims: readonly ReportClaim[] }) {
 export function ReportPage({ apiBaseUrl, analysisId }: ReportPageProps) {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     void fetchAnalysis(fetch, apiBaseUrl, analysisId, controller.signal).then(setResult).catch((reason: unknown) => {
@@ -24,7 +25,21 @@ export function ReportPage({ apiBaseUrl, analysisId }: ReportPageProps) {
   }, [analysisId, apiBaseUrl]);
   if (error) return <main className="report-main"><div className="state-panel error-panel" role="alert"><h2>Report unavailable</h2><p>{error}</p></div></main>;
   if (!result) return <main className="report-main"><div className="analysis-banner" role="status">Loading verified report…</div></main>;
-  if (!result.output || !("title" in result.output)) return <main className="report-main"><div className="state-panel error-panel"><h2>Deep dive incomplete</h2><p>{result.safe_detail ?? "The report has no verified output."}</p></div></main>;
+  async function retry() {
+    if (!result) return;
+    setRetrying(true);
+    setError(null);
+    try {
+      const retried = await retryAnalysis(fetch, apiBaseUrl, result.id);
+      window.history.replaceState(null, "", `#report/${encodeURIComponent(retried.id)}`);
+      setResult(retried);
+    } catch (reason) {
+      setError(reason instanceof AnalysisApiError ? reason.message : "The report could not be retried.");
+    } finally {
+      setRetrying(false);
+    }
+  }
+  if (!result.output || !("title" in result.output)) return <main className="report-main"><a className="back-link" href={`#explore/${encodeURIComponent(result.work_id)}`}>← Back to paper</a><div className="state-panel error-panel"><h2>Deep dive incomplete</h2><p>{result.safe_detail ?? "The report has no verified output."}</p>{result.status === "failed" && <button type="button" disabled={retrying} onClick={() => void retry()}>{retrying ? "Retrying locally…" : "Retry failed report"}</button>}</div></main>;
   const report = result.output;
   const sections = [["Executive significance", report.executive_significance], ["Problem and context", report.problem_context], ["Method", report.method], ["Evaluation", report.evaluation], ["Limitations", report.limitations]] as const;
   return <main className="report-main">

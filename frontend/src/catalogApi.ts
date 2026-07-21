@@ -21,6 +21,9 @@ export interface CatalogPaper {
   readonly abstract: string | null;
   readonly publication_status: "unknown" | "preprint" | "submitted" | "accepted" | "published" | "withdrawn";
   readonly published_at: string | null;
+  readonly submitted_at: string | null;
+  readonly arxiv_announced_at: string | null;
+  readonly locally_ingested_at: string;
   readonly updated_at: string;
   readonly current_version: string;
   readonly authors: readonly CatalogAuthor[];
@@ -145,6 +148,9 @@ function isPaper(value: unknown): value is CatalogPaper {
     isStringOrNull(value.abstract) &&
     typeof value.publication_status === "string" &&
     isStringOrNull(value.published_at) &&
+    isStringOrNull(value.submitted_at) &&
+    isStringOrNull(value.arxiv_announced_at) &&
+    typeof value.locally_ingested_at === "string" &&
     typeof value.updated_at === "string" &&
     typeof value.current_version === "string" &&
     Array.isArray(value.authors) && value.authors.every(isAuthor) &&

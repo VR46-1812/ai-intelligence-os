@@ -193,3 +193,12 @@ export async function fetchAnalysis(fetcher: typeof fetch, base: string, id: str
   if (!isAnalysis(payload)) throw new AnalysisApiError("The stored analysis response was invalid.");
   return payload;
 }
+
+export async function retryAnalysis(fetcher: typeof fetch, base: string, id: string): Promise<AnalysisResult> {
+  const payload = await json(await fetcher(`${base}/analyses/${encodeURIComponent(id)}/retry`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  }));
+  if (!isAnalysis(payload)) throw new AnalysisApiError("The retried Scout response was invalid.");
+  return payload;
+}

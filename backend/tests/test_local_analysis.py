@@ -139,22 +139,24 @@ def _brief(evidence_id: str = "ev-1") -> str:
 
 
 def _deep_dive() -> str:
-    section = {
-        "markdown": "The supplied evidence describes a bounded agent method.",
-        "confidence": 0.75,
-        "claim_ids": ["claim-1"],
-    }
+    def section(label: str) -> dict[str, object]:
+        return {
+            "markdown": f"The supplied evidence describes the distinct {label} aspect.",
+            "confidence": 0.75,
+            "claim_ids": ["claim-1"],
+        }
+
     return json.dumps(
         {
             "schema_version": "1.0",
             "work_id": "work",
             "title": "Local Agents",
             "publication_status": "preprint",
-            "executive_significance": section,
-            "problem_context": section,
-            "method": section,
-            "evaluation": section,
-            "limitations": section,
+            "executive_significance": section("significance"),
+            "problem_context": section("problem context"),
+            "method": section("method"),
+            "evaluation": section("evaluation"),
+            "limitations": section("limitations"),
             "reproducibility": {
                 "status": "unknown",
                 "repository_urls": [],
@@ -225,6 +227,23 @@ def test_invalid_or_unsupported_output_gets_exactly_one_repair(
     assert result.citations_verified == 1 and scout.calls == 2
 
 
+def test_repetitive_output_gets_one_quality_repair(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    repetitive = json.loads(_brief())
+    repetitive["problem"] = repetitive["change"]
+    scout = FakeScout([json.dumps(repetitive), _brief()])
+    service = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+
+    result = asyncio.run(service.analyze("work", AnalysisType.FAST_BRIEF))
+
+    assert result.status is AnalysisStatus.SUCCEEDED
+    assert scout.calls == 2
+
+
 def test_second_invalid_response_is_stored_as_safe_failure(
     analysis_store: tuple[AppSettings, sqlite3.Connection],
 ) -> None:
@@ -239,6 +258,54 @@ def test_second_invalid_response_is_stored_as_safe_failure(
     assert result.status is AnalysisStatus.FAILED and scout.calls == 2
     assert result.error_code == "STRUCTURED_OUTPUT_INVALID"
     assert result.output is None and "prompt" not in (result.safe_detail or "").casefold()
+
+
+def test_failed_analysis_can_retry_without_exposing_previous_output(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    scout = FakeScout(["{}", "{}", _brief()])
+    service = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+    failed = asyncio.run(service.analyze("work", AnalysisType.FAST_BRIEF))
+
+    retried = asyncio.run(service.retry_analysis(failed.id))
+
+    assert failed.status is AnalysisStatus.FAILED
+    assert retried.status is AnalysisStatus.SUCCEEDED and retried.id != failed.id
+    assert scout.calls == 3
+
+
+def test_legacy_cached_output_is_rejected_safely_instead_of_crashing_today(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    service = ScoutAnalysisService(
+        connection,
+        SQLiteRepositories.for_connection(connection),
+        FakeScout([_brief(), _brief()]),
+        settings,
+    )
+    result = asyncio.run(service.analyze("work", AnalysisType.FAST_BRIEF))
+    legacy = json.loads(_brief())
+    legacy["technical_relevance"] = "unknown"
+    legacy["commercial_relevance"] = "unknown"
+    connection.execute(
+        "UPDATE analysis_runs SET output_json=? WHERE id=?", (json.dumps(legacy), result.id)
+    )
+    connection.commit()
+
+    cached = service.get_analysis(result.id)
+    latest = service.latest_for_work("work", AnalysisType.FAST_BRIEF)
+
+    assert cached is not None and cached.status is AnalysisStatus.REJECTED
+    assert cached.error_code == "STORED_OUTPUT_OUTDATED" and cached.output is None
+    assert latest is not None and latest.status is AnalysisStatus.REJECTED
+    assert "validation" in (latest.safe_detail or "")
+
+    retried = asyncio.run(service.retry_analysis(result.id))
+    assert retried.status is AnalysisStatus.SUCCEEDED and retried.id != result.id
 
 
 def test_deep_dive_contract_and_claim_links_are_persisted(

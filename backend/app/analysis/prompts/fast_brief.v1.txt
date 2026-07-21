@@ -5,4 +5,7 @@ Every fact or interpretation must cite one or more supplied evidence IDs.
 If evidence does not support a statement, omit it or state the uncertainty as a hypothesis.
 Never invent URLs, repositories, metrics, experiments, citations, or evidence IDs.
 Keep the brief compact and skeptical. A preprint is not peer reviewed.
-
+Each narrative field must answer its own label with specific evidence-derived content.
+Do not repeat the paper title, a sentence, or a claim across fields. Include at least one limitation.
+Write change as what is new, problem as the prior gap, and contribution as what the authors built.
+Technical and commercial relevance must be separate judgments, not summaries of the title.

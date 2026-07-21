@@ -136,7 +136,9 @@ function PaperDetail({ apiBaseUrl, paper, state, onClose, evidence, evidenceStat
           <h2>{paper.title}</h2>
           <p className="detail-authors">{authorLine(paper)}</p>
           <div className="detail-meta">
-            <span>Published {formatDate(paper.published_at)}</span>
+            <span>Submitted {formatDate(paper.submitted_at)}</span>
+            <span>arXiv announced {formatDate(paper.arxiv_announced_at)}</span>
+            <span>Ingested locally {formatDate(paper.locally_ingested_at)}</span>
             <span>{paper.identities.find((identity) => identity.id_type === "arxiv")?.value}</span>
           </div>
           <section aria-labelledby="detail-abstract-heading">
@@ -200,6 +202,7 @@ function PaperDetail({ apiBaseUrl, paper, state, onClose, evidence, evidenceStat
               <button className="primary-analysis" type="button" disabled={analysisState === "brief" || analysisState === "deep-dive"} onClick={() => void runAnalysis("deep-dive")}>{analysisState === "deep-dive" ? "Building deep dive…" : "Run deep dive"}</button>
             </div>
             {analysisError && <p className="evidence-warning" role="alert">{analysisError}</p>}
+            {analysis?.status === "failed" && <a className="primary-link" href={`#report/${encodeURIComponent(analysis.id)}`}>Open failure and retry →</a>}
             {analysis?.output && "change" in analysis.output && <article className="generated-brief"><strong>{analysis.output.change}</strong><p>{analysis.output.contribution}</p><span>{Math.round(analysis.citation_coverage * 100)}% citations verified · {analysis.cached ? "cached" : `${(analysis.duration_ms ?? 0) / 1000}s`}</span></article>}
             {analysis?.output && "title" in analysis.output && <a className="primary-link" href={`#report/${encodeURIComponent(analysis.id)}`}>Open verified deep dive →</a>}
           </section>
@@ -454,7 +457,8 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
                   <article className={selectedId === paper.id ? "paper-card selected" : "paper-card"} key={paper.id}>
                     <div className="paper-meta-row">
                       <span className="source-badge">{paper.source_name}</span>
-                      <span>{formatDate(paper.published_at)}</span>
+                      <span>Submitted {formatDate(paper.submitted_at)}</span>
+                      <span>Ingested {formatDate(paper.locally_ingested_at)}</span>
                       <span>{paper.current_version}</span>
                       <span className={`document-state ${paper.document_status}`}>{paper.document_status.replace("_", " ")}</span>
                     </div>

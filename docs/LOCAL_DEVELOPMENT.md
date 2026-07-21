@@ -104,6 +104,32 @@ The Vite development server proxies `/api` requests to the local backend. To
 override the frontend API base path, copy `.env.example` to `.env` and update
 `VITE_API_BASE_URL`.
 
+## Daily local operations
+
+The backend schedules one bounded daily run at `06:00 Asia/Kolkata` by default. The first install
+waits for the next schedule; after at least one daily run exists, a startup within the configured
+24-hour grace window recovers a missed run. A process restart marks abandoned queued/running daily
+runs as failed and retryable. Manual and scheduled runs share one lock.
+
+Run or inspect the same production pipeline without the UI:
+
+```powershell
+cd backend
+uv run python -m app.operations.cli run-now
+uv run python -m app.operations.cli status
+uv run python -m app.operations.cli cleanup       # dry run
+uv run python -m app.operations.cli cleanup --apply
+```
+
+The ordered path is arXiv sync and normalization, PDF acquisition and extraction, deterministic
+ranking, one top Scout brief, then retention cleanup. Each limit comes from the existing typed
+configuration. The UI exposes manual execution at `/#today` and `/#system`.
+
+Catalog responses distinguish `submitted_at` (original Atom publication time),
+`arxiv_announced_at` (Atom update time for the stored version), and `locally_ingested_at`
+(the local raw-capture time). The legacy `published_at` field remains as a compatibility alias for
+the submitted date.
+
 ## Backend configuration
 
 Backend settings are immutable Pydantic models loaded from environment variables

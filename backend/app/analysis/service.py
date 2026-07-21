@@ -51,6 +51,10 @@ class CitationVerificationError(ValueError):
     """Raised when model output cites absent evidence or asserts unsupported facts."""
 
 
+class OutputQualityError(ValueError):
+    """Raised when structured output is valid but repetitive or vacuous."""
+
+
 @dataclass(frozen=True, slots=True)
 class EvidenceInput:
     id: str
@@ -167,7 +171,15 @@ class ScoutAnalysisService:
         except (OllamaError, AnalysisServiceError) as error:
             code = error.code
             detail = error.safe_detail
-        except (ValidationError, CitationVerificationError, json.JSONDecodeError):
+        except OutputQualityError:
+            code = "OUTPUT_QUALITY_INVALID"
+            detail = "Scout repeated or omitted required analysis fields. Retry the report once."
+        except CitationVerificationError:
+            code = "CITATION_VERIFICATION_FAILED"
+            detail = (
+                "Scout citations did not pass stored-evidence verification. Retry the report once."
+            )
+        except (ValidationError, json.JSONDecodeError):
             code = "STRUCTURED_OUTPUT_INVALID"
             detail = "The Scout could not produce a citation-safe structured report."
         failed = running.model_copy(
@@ -187,12 +199,41 @@ class ScoutAnalysisService:
         run = self._repositories.analyses.get(analysis_id)
         return None if run is None else self._public_result(run, cached=True)
 
+    async def retry_analysis(self, analysis_id: str) -> AnalysisResult:
+        run = self._repositories.analyses.get(analysis_id)
+        if run is None:
+            raise AnalysisServiceError("ANALYSIS_NOT_FOUND", "Analysis not found.", status_code=404)
+        public = self._public_result(run, cached=True)
+        if public.status not in {AnalysisStatus.FAILED, AnalysisStatus.REJECTED}:
+            raise AnalysisServiceError(
+                "ANALYSIS_NOT_RETRYABLE",
+                "Only a failed report can be retried.",
+                status_code=409,
+            )
+        with transaction(self._connection):
+            self._repositories.analyses.update(
+                run.model_copy(
+                    update={"input_fingerprint": f"{run.input_fingerprint}:failed:{run.id}"}
+                )
+            )
+        return await self.analyze(run.work_id, run.analysis_type)
+
     def latest_for_work(self, work_id: str, analysis_type: AnalysisType) -> AnalysisResult | None:
         rows = self._repositories.analyses.list(
-            PageRequest(limit=1),
+            PageRequest(limit=100),
             AnalysisRunFilter(work_id=work_id, analysis_type=analysis_type),
         )
-        return None if not rows else self._public_result(rows[0], cached=True)
+        if not rows:
+            return None
+        results = tuple(self._public_result(row, cached=True) for row in rows)
+        return next(
+            (
+                result
+                for result in results
+                if result.status is AnalysisStatus.SUCCEEDED and result.output is not None
+            ),
+            results[0],
+        )
 
     def ranked_today(self, limit: int = 10) -> tuple[tuple[str, str, float], ...]:
         rows = self._connection.execute(
@@ -234,13 +275,21 @@ class ScoutAnalysisService:
         )
         try:
             report = model_type.model_validate_json(first.response_text)
+            self._validate_output_quality(report, work)
             self._verify_report(report, work)
             return report
-        except (ValidationError, CitationVerificationError, json.JSONDecodeError):
+        except (
+            ValidationError,
+            CitationVerificationError,
+            OutputQualityError,
+            json.JSONDecodeError,
+        ):
             repair_prompt = (
                 prompt
                 + "\nThe prior JSON failed schema or citation verification. Correct it once. "
                 + "Remove every unsupported claim and use only supplied evidence IDs."
+                + " Every required field must be specific and non-repetitive. "
+                + "Narrative fields must be different from the title."
                 + "\nPRIOR_JSON:\n"
                 + first.response_text[:12_000]
             )
@@ -250,8 +299,43 @@ class ScoutAnalysisService:
                 profile=self._settings.models.scout,
             )
             report = model_type.model_validate_json(repaired.response_text)
+            self._validate_output_quality(report, work)
             self._verify_report(report, work)
             return report
+
+    @staticmethod
+    def _validate_output_quality(report: FastBrief | DeepDiveReport, work: WorkInput) -> None:
+        def normalized(value: str) -> str:
+            return " ".join(value.casefold().split()).strip(" .,:;-")
+
+        if isinstance(report, FastBrief):
+            narrative = (
+                report.change,
+                report.problem,
+                report.contribution,
+                report.technical_relevance,
+                report.commercial_relevance,
+            )
+            values = tuple(normalized(value) for value in narrative)
+            if any(not value for value in values) or len(set(values)) != len(values):
+                raise OutputQualityError("brief fields are empty or repetitive")
+            if normalized(work.title) in set(values):
+                raise OutputQualityError("brief repeats the title instead of analysis")
+            if len({normalized(item) for item in report.limitations}) != len(report.limitations):
+                raise OutputQualityError("brief limitations are repetitive")
+            claim_texts = tuple(normalized(claim.text) for claim in report.claims)
+            if len(set(claim_texts)) != len(claim_texts):
+                raise OutputQualityError("brief claims are repetitive")
+            return
+        sections = (
+            report.executive_significance.markdown,
+            report.problem_context.markdown,
+            report.method.markdown,
+            report.evaluation.markdown,
+            report.limitations.markdown,
+        )
+        if len({normalized(value) for value in sections}) != len(sections):
+            raise OutputQualityError("deep-dive sections are repetitive")
 
     @staticmethod
     def _render_prompt(template: str, work: WorkInput) -> str:
@@ -566,7 +650,23 @@ class ScoutAnalysisService:
             model_type = (
                 FastBrief if run.analysis_type is AnalysisType.FAST_BRIEF else DeepDiveReport
             )
-            output = model_type.model_validate(payload)
+            try:
+                output = model_type.model_validate(payload)
+            except ValidationError:
+                return AnalysisResult(
+                    id=run.id,
+                    work_id=run.work_id,
+                    analysis_type=run.analysis_type,
+                    status=AnalysisStatus.REJECTED,
+                    cached=cached,
+                    duration_ms=run.duration_ms,
+                    error_code="STORED_OUTPUT_OUTDATED",
+                    safe_detail=(
+                        "This stored report predates current output validation. "
+                        "Generate it again to replace the cached view."
+                    ),
+                    created_at=run.created_at,
+                )
         return AnalysisResult(
             id=run.id,
             work_id=run.work_id,

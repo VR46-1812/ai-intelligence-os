@@ -9,9 +9,10 @@ import { ExplorePage } from "./ExplorePage";
 import { fetchModelStatus, type ModelStatus } from "./analysisApi";
 import { ReportPage } from "./ReportPage";
 import { TodayPage } from "./TodayPage";
+import { SystemPage } from "./SystemPage";
 
 const navigationItems = ["Today", "Explore", "Topics", "Opportunities", "System"] as const;
-type ActivePage = "today" | "explore" | "report";
+type ActivePage = "today" | "explore" | "report" | "system";
 
 const healthCopy: Record<ApiHealthState, { label: string; detail: string }> = {
   loading: {
@@ -42,6 +43,7 @@ function routeFromHash(): { page: ActivePage; paperId: string | null; analysisId
       analysisId: null,
     };
   }
+  if (route === "system") return { page: "system", paperId: null, analysisId: null };
   return { page: "today", paperId: null, analysisId: null };
 }
 
@@ -96,7 +98,7 @@ function App() {
           <ul>
             {navigationItems.map((item) => {
               const itemKey = item.toLowerCase();
-              const implemented = itemKey === "today" || itemKey === "explore";
+              const implemented = itemKey === "today" || itemKey === "explore" || itemKey === "system";
               return (
                 <li key={item}>
                   <a
@@ -123,7 +125,7 @@ function App() {
         <header className="topbar">
           <div>
             <p className="eyebrow">{formattedDate} · Local workspace</p>
-            <h1>{route.page === "explore" ? "Explore" : route.page === "report" ? "Deep Dive" : "Today"}</h1>
+            <h1>{route.page === "explore" ? "Explore" : route.page === "report" ? "Deep Dive" : route.page === "system" ? "System" : "Today"}</h1>
           </div>
           <div className="topbar-statuses"><div className={modelStatus?.available && modelStatus.model_installed ? "model-pill ready" : "model-pill"} title={modelStatus?.detail ?? "Checking local model"}><span />Scout · {modelStatus?.model ?? "checking"}</div><div className={`health-pill ${healthState}`} role="status" aria-live="polite">
             <span className="status-dot" aria-hidden="true" />
@@ -136,6 +138,8 @@ function App() {
 
         {route.page === "explore" ? (
           <ExplorePage apiBaseUrl={apiBaseUrl} initialPaperId={route.paperId} />
+        ) : route.page === "system" ? (
+          <SystemPage apiBaseUrl={apiBaseUrl} />
         ) : route.page === "report" && route.analysisId ? (
           <ReportPage apiBaseUrl={apiBaseUrl} analysisId={route.analysisId} />
         ) : (

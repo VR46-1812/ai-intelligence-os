@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 import type { ApiHealthState } from "./apiHealth";
-import { AnalysisApiError, fetchToday, generateToday, type TodayReport } from "./analysisApi";
+import { AnalysisApiError, fetchToday, type TodayReport } from "./analysisApi";
+import { fetchDailyStatus, OperationsApiError, runDailyNow, type DailyRunStatus } from "./operationsApi";
 
 interface TodayPageProps {
   readonly apiBaseUrl: string;
@@ -13,11 +14,15 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
   const [report, setReport] = useState<TodayReport | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error" | "generating">("loading");
   const [error, setError] = useState("Today could not reach the local analysis service.");
+  const [daily, setDaily] = useState<DailyRunStatus | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetchToday(fetch, apiBaseUrl, controller.signal)
-      .then((value) => { setReport(value); setState("ready"); })
+    void Promise.all([
+      fetchToday(fetch, apiBaseUrl, controller.signal),
+      fetchDailyStatus(fetch, apiBaseUrl, controller.signal),
+    ])
+      .then(([value, status]) => { setReport(value); setDaily(status); setState("ready"); })
       .catch((reason: unknown) => {
         if (controller.signal.aborted) return;
         setError(reason instanceof AnalysisApiError ? reason.message : "Today could not reach the local analysis service.");
@@ -26,13 +31,26 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
     return () => controller.abort();
   }, [apiBaseUrl]);
 
-  async function createBrief() {
+  async function runNow() {
     setState("generating");
     try {
-      setReport(await generateToday(fetch, apiBaseUrl));
+      const result = await runDailyNow(fetch, apiBaseUrl);
+      if (result.status === "failed") {
+        setError(result.safe_detail ?? "The daily pipeline failed safely. Open System to retry.");
+        setState("error");
+        setDaily(await fetchDailyStatus(fetch, apiBaseUrl, new AbortController().signal));
+        return;
+      }
+      const controller = new AbortController();
+      const [nextReport, nextStatus] = await Promise.all([
+        fetchToday(fetch, apiBaseUrl, controller.signal),
+        fetchDailyStatus(fetch, apiBaseUrl, controller.signal),
+      ]);
+      setReport(nextReport);
+      setDaily(nextStatus);
       setState("ready");
     } catch (reason) {
-      setError(reason instanceof AnalysisApiError ? reason.message : "Scout generation failed safely.");
+      setError(reason instanceof OperationsApiError ? reason.message : "The daily pipeline failed safely.");
       setState("error");
     }
   }
@@ -45,8 +63,8 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
           <h2 id="today-heading">The strongest local research signals.</h2>
           <p className="hero-copy">Ranked papers and cached Scout briefs stay on this machine. Every factual brief claim must point to stored evidence.</p>
         </div>
-        <button className="sync-button" type="button" disabled={state === "generating" || healthState !== "healthy"} onClick={() => void createBrief()}>
-          {state === "generating" ? "Scout is analyzing…" : "Generate top brief"}
+        <button className="sync-button" type="button" disabled={state === "generating" || daily?.running || healthState !== "healthy"} onClick={() => void runNow()}>
+          {state === "generating" ? "Running local pipeline…" : "Run Now"}
         </button>
       </section>
 
@@ -54,6 +72,7 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
       {state === "error" && <div className="analysis-banner error" role="alert">{error}</div>}
       {report && (
         <>
+          {daily && <section className="run-strip" aria-label="Daily pipeline status"><div><span className={daily.running ? "model-orb" : "model-orb ready"} /><strong>{daily.running ? "Daily run in progress" : daily.latest_run ? `Latest run ${daily.latest_run.status}` : "Daily scheduler ready"}</strong></div><span>Latest success {daily.latest_success_at ? new Date(daily.latest_success_at).toLocaleString() : "not yet"}</span>{daily.latest_run && <span>{daily.latest_run.counts.fetched} fetched · {daily.latest_run.counts.documents_processed} documents · {daily.latest_run.counts.works_ranked} ranked · {daily.latest_run.counts.briefs_generated + daily.latest_run.counts.briefs_cached} briefs</span>}<a href="#system">System details →</a></section>}
           <section className="model-strip" aria-label="Local model status">
             <span className={report.model.available && report.model.model_installed ? "model-orb ready" : "model-orb"} />
             <div><strong>{report.model.model}</strong><small>{report.model.detail}</small></div>

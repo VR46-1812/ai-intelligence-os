@@ -110,6 +110,11 @@ def test_daily_work_limits_have_bounded_defaults() -> None:
 
     assert settings.daily_work.maximum_fast_briefs == 10
     assert settings.daily_work.maximum_automatic_deep_dives == 2
+    assert settings.scheduler.enabled is True
+    assert settings.scheduler.timezone == "Asia/Kolkata"
+    assert settings.scheduler.maximum_records == 5
+    assert settings.scheduler.document_limit == 5
+    assert settings.scheduler.top_briefs == 1
 
 
 def test_daily_work_limits_accept_valid_environment_overrides(

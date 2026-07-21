@@ -115,6 +115,21 @@ async def analysis_detail(analysis_id: EntityId, request: Request) -> AnalysisRe
     return result
 
 
+@router.post("/analyses/{analysis_id}/retry", response_model=AnalysisResult)
+async def retry_analysis(analysis_id: EntityId, request: Request) -> AnalysisResult:
+    try:
+        async with _service(request) as service:
+            return await service.retry_analysis(analysis_id)
+    except AnalysisServiceError as error:
+        raise _safe_failure(error) from error
+    except Exception as error:
+        logger.exception("analysis_retry_failed", extra={"operation": "retry_analysis"})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="The failed local report could not be retried.",
+        ) from error
+
+
 async def _today_report(request: Request, *, generate_limit: int = 0) -> TodayReport:
     settings: AppSettings = request.app.state.settings
     async with _service(request) as service:

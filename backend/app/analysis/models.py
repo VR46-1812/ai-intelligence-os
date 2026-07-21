@@ -30,19 +30,19 @@ class FastBrief(AnalysisModel):
     schema_version: str = Field(pattern=r"^1\.0$")
     work_id: str = Field(min_length=1)
     change: str = Field(min_length=1, max_length=320)
-    problem: str
-    contribution: str
+    problem: str = Field(min_length=8, max_length=800)
+    contribution: str = Field(min_length=8, max_length=800)
     evidence_state: str = Field(pattern=r"^(strong|moderate|weak|unknown)$")
-    limitations: tuple[str, ...]
+    limitations: tuple[str, ...] = Field(min_length=1, max_length=8)
     code_state: str = Field(pattern=r"^(official|author_linked|community|none_found|unknown)$")
-    technical_relevance: str
-    commercial_relevance: str
+    technical_relevance: str = Field(min_length=8, max_length=800)
+    commercial_relevance: str = Field(min_length=8, max_length=800)
     recommended_action: str = Field(pattern=r"^(deep_dive|track|read_source|ignore|manual_review)$")
-    claims: tuple[FastClaim, ...]
+    claims: tuple[FastClaim, ...] = Field(min_length=1, max_length=20)
 
 
 class ReportSection(AnalysisModel):
-    markdown: str
+    markdown: str = Field(min_length=8)
     confidence: float = Field(ge=0, le=1)
     claim_ids: tuple[str, ...]
 

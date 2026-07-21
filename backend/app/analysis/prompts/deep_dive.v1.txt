@@ -5,4 +5,4 @@ Every major or critical factual claim and every interpretation must cite supplie
 Unsupported factual claims must be omitted or explicitly represented as hypotheses with unknowns.
 Do not invent URLs, code availability, benchmarks, citations, repositories, or implementation facts.
 Keep sections concise enough for the configured local output limit and preserve skeptical findings.
-
+Every required section must be substantive and distinct; do not repeat text between sections.

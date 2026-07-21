@@ -6,7 +6,7 @@ import asyncio
 import shutil
 import sqlite3
 from collections.abc import Iterator
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -59,8 +59,8 @@ def catalog_store() -> Iterator[tuple[Path, sqlite3.Connection, SQLiteCatalogRea
         connection.executemany(
             """INSERT INTO source_records(
             id, source_id, upstream_id, upstream_version, canonical_url, payload_sha256,
-            raw_payload_path, observed_at, published_at, normalization_status
-            ) VALUES (?, 'source-arxiv', ?, 'v1', ?, ?, ?, ?, ?, 'normalized')""",
+            raw_payload_path, observed_at, published_at, updated_at_upstream, normalization_status
+            ) VALUES (?, 'source-arxiv', ?, 'v1', ?, ?, ?, ?, ?, ?, 'normalized')""",
             [
                 (
                     "record-agent",
@@ -70,6 +70,7 @@ def catalog_store() -> Iterator[tuple[Path, sqlite3.Connection, SQLiteCatalogRea
                     "raw/private-agent.xml",
                     "2026-07-17T12:00:00Z",
                     "2026-07-17T10:00:00Z",
+                    "2026-07-17T11:00:00Z",
                 ),
                 (
                     "record-local",
@@ -79,6 +80,7 @@ def catalog_store() -> Iterator[tuple[Path, sqlite3.Connection, SQLiteCatalogRea
                     "raw/private-local.xml",
                     "2026-07-18T12:00:00Z",
                     "2026-07-18T10:00:00Z",
+                    "2026-07-18T11:00:00Z",
                 ),
                 (
                     "record-vision",
@@ -88,6 +90,7 @@ def catalog_store() -> Iterator[tuple[Path, sqlite3.Connection, SQLiteCatalogRea
                     "raw/private-vision.xml",
                     "2026-07-19T12:00:00Z",
                     None,
+                    "2026-07-19T11:00:00Z",
                 ),
             ],
         )
@@ -313,6 +316,9 @@ def test_repository_detail_hydrates_public_fields_without_raw_provenance_paths(
     assert {identity.id_type.value for identity in paper.identities} == {"arxiv", "doi"}
     assert paper.external_url == "https://arxiv.org/abs/2607.00001"
     assert paper.document_status == "not_acquired" and paper.evidence_count == 0
+    assert paper.submitted_at == datetime(2026, 7, 17, 10, tzinfo=UTC)
+    assert paper.arxiv_announced_at == datetime(2026, 7, 17, 11, tzinfo=UTC)
+    assert paper.locally_ingested_at == datetime(2026, 7, 17, 12, tzinfo=UTC)
     serialized = paper.model_dump_json()
     assert "raw/private" not in serialized
     assert "payload" not in serialized

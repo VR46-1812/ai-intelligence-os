@@ -17,6 +17,9 @@ from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.discovery.api import public_router as public_discovery_router
 from app.discovery.api import router as discovery_router
 from app.documents.api import router as documents_router
+from app.operations.api import router as operations_router
+from app.operations.scheduler import DailyScheduler
+from app.operations.service import ProductionDailyRunner
 from app.ranking.api import router as ranking_router
 from app.repositories import SQLiteRepositories
 from app.sources.catalog import upsert_arxiv_source
@@ -49,6 +52,17 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
         resolved_settings.paths.database_path,
         resolved_settings.database.busy_timeout_ms,
     )
+    discovery_lock = asyncio.Lock()
+    daily_lock = asyncio.Lock()
+    generation_semaphore = asyncio.Semaphore(resolved_settings.resources.llm_generation_concurrency)
+    daily_runner = ProductionDailyRunner(
+        resolved_settings,
+        database,
+        daily_lock,
+        discovery_lock,
+        generation_semaphore,
+    )
+    daily_scheduler = DailyScheduler(daily_runner, resolved_settings.scheduler)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
@@ -66,7 +80,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                 )
         finally:
             connection.close()
-        yield
+        await daily_scheduler.start()
+        try:
+            yield
+        finally:
+            await daily_scheduler.stop()
 
     application = FastAPI(
         title="AI Intelligence OS API",
@@ -76,10 +94,10 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     )
     application.state.settings = resolved_settings
     application.state.database = database
-    application.state.discovery_sync_lock = asyncio.Lock()
-    application.state.llm_generation_semaphore = asyncio.Semaphore(
-        resolved_settings.resources.llm_generation_concurrency
-    )
+    application.state.discovery_sync_lock = discovery_lock
+    application.state.llm_generation_semaphore = generation_semaphore
+    application.state.daily_runner = daily_runner
+    application.state.daily_scheduler = daily_scheduler
 
     application.add_api_route(
         "/health",
@@ -94,6 +112,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.include_router(documents_router)
     application.include_router(ranking_router)
     application.include_router(analysis_router)
+    application.include_router(operations_router)
 
     return application
 
