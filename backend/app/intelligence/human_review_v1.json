@@ -96,6 +96,70 @@
       "reviewer_question": "Is the technical evidence sufficient to verify the buyer-value assertion?",
       "expected_decision": "no",
       "pass_criteria": "Technical capability remains cited while buyer value stays explicitly uncertain and requires validation."
+    },
+    {
+      "id": "source-01",
+      "category": "source_relevance",
+      "input_summary": "A configured GitHub search returns a recently updated repository unrelated to the controlled AI topics.",
+      "reviewer_question": "Should activity alone make it a priority development?",
+      "expected_decision": "no",
+      "pass_criteria": "Deterministic topic relevance keeps the repository below relevant primary research."
+    },
+    {
+      "id": "source-02",
+      "category": "source_relevance",
+      "input_summary": "A Reddit post links an in-scope arXiv paper but adds an unsupported performance claim.",
+      "reviewer_question": "Can the discussion discover the paper without proving the claim?",
+      "expected_decision": "yes",
+      "pass_criteria": "The post remains a Tier D community signal and the technical claim requires primary evidence."
+    },
+    {
+      "id": "event-duplicate-01",
+      "category": "duplicate_event_prevention",
+      "input_summary": "The same model card and repository release are ingested twice with identical canonical identities.",
+      "reviewer_question": "May a second development card be created?",
+      "expected_decision": "no",
+      "pass_criteria": "Idempotent source artifacts remain attached to one canonical linked event."
+    },
+    {
+      "id": "event-merge-01",
+      "category": "false_cross_source_merge_prevention",
+      "input_summary": "Two unrelated projects share the title Agent Memory but expose no common identifier or explicit URL.",
+      "reviewer_question": "May title similarity merge them?",
+      "expected_decision": "no",
+      "pass_criteria": "They remain separate events because title-only matching is prohibited."
+    },
+    {
+      "id": "classification-01",
+      "category": "research_versus_opinion",
+      "input_summary": "An official company blog interprets a benchmark from its linked paper.",
+      "reviewer_question": "Is the blog interpretation equivalent to the paper evidence?",
+      "expected_decision": "no",
+      "pass_criteria": "The post is labelled interpretation while the paper remains primary research evidence."
+    },
+    {
+      "id": "learning-01",
+      "category": "learning_path_usefulness",
+      "input_summary": "A recommended exercise assumes retrieval evaluation knowledge that the plan never lists.",
+      "reviewer_question": "Does the learning plan pass review?",
+      "expected_decision": "no",
+      "pass_criteria": "The plan states prerequisites, a bounded exercise, evidence and an achievable time estimate."
+    },
+    {
+      "id": "india-01",
+      "category": "india_market_relevance",
+      "input_summary": "A workflow is proposed for Indian mid-market buyers with an INR pilot price but no interviews.",
+      "reviewer_question": "Can the price be presented as validated demand?",
+      "expected_decision": "no",
+      "pass_criteria": "Buyer and INR pricing remain hypotheses with a named validation experiment and confidence."
+    },
+    {
+      "id": "personal-01",
+      "category": "personal_project_relevance",
+      "input_summary": "A cited document-retrieval method may apply differently to RentAssure, SageAlpha, BidReady and the US-school chatbot.",
+      "reviewer_question": "Should one generic claim be copied to all four projects?",
+      "expected_decision": "no",
+      "pass_criteria": "Each project receives a separately labelled relevance interpretation grounded in the same visible evidence."
     }
   ]
 }

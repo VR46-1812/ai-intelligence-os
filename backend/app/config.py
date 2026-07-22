@@ -170,6 +170,13 @@ class SourceSettings(BaseModel):
         "https://huggingface.co/blog/feed.xml",
         "https://deepmind.google/blog/rss.xml",
     )
+    youtube_feeds: tuple[str, ...] = ()
+    reddit_feeds: tuple[str, ...] = ("https://www.reddit.com/r/LocalLLaMA/.rss",)
+    medium_feeds: tuple[str, ...] = ("https://medium.com/feed/@huggingface",)
+    substack_feeds: tuple[str, ...] = ("https://importai.substack.com/feed",)
+    watchlist_feeds: tuple[str, ...] = ()
+    github_watchlist: tuple[str, ...] = ()
+    github_search_queries: tuple[str, ...] = ("topic:llm stars:>100",)
     metadata_overlap_hours: int = Field(default=24, ge=1, le=168)
     github_token: SecretStr | None = None
 
@@ -188,6 +195,29 @@ class SourceSettings(BaseModel):
         for feed in self.rss_feeds:
             if not feed.startswith("https://"):
                 raise ValueError("rss_feeds must use HTTPS")
+        for feed in (
+            *self.youtube_feeds,
+            *self.reddit_feeds,
+            *self.medium_feeds,
+            *self.substack_feeds,
+            *self.watchlist_feeds,
+        ):
+            if not feed.startswith("https://"):
+                raise ValueError("community and watchlist feeds must use HTTPS")
+        feed_groups = (
+            self.youtube_feeds,
+            self.reddit_feeds,
+            self.medium_feeds,
+            self.substack_feeds,
+            self.watchlist_feeds,
+        )
+        if any(len(group) > 20 for group in feed_groups):
+            raise ValueError("each community or watchlist feed group is limited to 20 entries")
+        if len(self.github_watchlist) > 20 or len(self.github_search_queries) > 10:
+            raise ValueError("GitHub watchlists and search queries exceed bounded limits")
+        for repository in self.github_watchlist:
+            if not repository.startswith("https://github.com/"):
+                raise ValueError("github_watchlist entries must be canonical GitHub HTTPS URLs")
         return self
 
 

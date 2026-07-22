@@ -127,6 +127,12 @@ allowlisted official RSS/Atom discovery alongside OpenReview and GitHub
 enrichment. It retains the same connector contract, trust policy, local storage,
 and free public-access boundary. Social feeds remain excluded.
 
+Weekend Beta, explicitly approved on 2026-07-22, adds bounded public-feed
+discovery for YouTube, Reddit, Medium, Substack and configured watchlists, plus
+user-supplied X exports. These remain Tier C/D discovery or interpretation
+signals and cannot establish technical facts. No access control, anti-bot
+challenge, robots policy, or platform term may be bypassed.
+
 General news and social media are discovery signals only and cannot establish technical facts.
 
 ## 8. Source trust policy
@@ -205,6 +211,9 @@ Phase-one target metrics:
 - 2026-07-22: V1.1 multi-source scope approved for OpenReview, GitHub enrichment,
   Hugging Face Hub, and allowlisted official RSS/Atom feeds; deterministic ranking
   and primary-evidence precedence remain authoritative.
+- 2026-07-22: Weekend Beta approved fourteen persisted sequential logical agents,
+  bounded community/watchlist discovery, conservative cross-source correction,
+  and expanded learning, commercial, India-market and personal relevance output.
 
 ## 14. Change control
 

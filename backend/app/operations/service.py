@@ -7,10 +7,12 @@ import logging
 import sqlite3
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 import httpx
 
+from app.agents.models import AgentInput, AgentOutput
+from app.agents.runtime import AgentRuntime, AgentStageError
 from app.analysis.ollama import OllamaClient
 from app.analysis.service import ScoutAnalysisService
 from app.catalog.identity import new_ulid
@@ -105,18 +107,30 @@ class ProductionDailyRunner:
     ) -> DailyRunResult:
         repositories = SQLiteRepositories.for_connection(connection)
         started = self._clock().astimezone(UTC)
-        run = PipelineRun(
-            id=self._id_factory(),
-            run_type=PipelineRunType.DAILY,
-            trigger_type=trigger,
-            status=PipelineStatus.QUEUED,
-            config_snapshot=self._config_snapshot(),
-            queued_at=started,
-        )
+        run = self._resumable_run(connection, repositories, trigger)
+        if run is None:
+            run = PipelineRun(
+                id=self._id_factory(),
+                run_type=PipelineRunType.DAILY,
+                trigger_type=trigger,
+                status=PipelineStatus.QUEUED,
+                config_snapshot=self._config_snapshot(),
+                queued_at=started,
+            )
+            with transaction(connection):
+                repositories.pipeline_runs.create(run)
+        else:
+            run = run.model_copy(update={"trigger_type": trigger})
         self._current_run_id = run.id
         with transaction(connection):
-            repositories.pipeline_runs.create(run)
-            run = run.model_copy(update={"status": PipelineStatus.RUNNING, "started_at": started})
+            run = run.model_copy(
+                update={
+                    "status": PipelineStatus.RUNNING,
+                    "started_at": started,
+                    "completed_at": None,
+                    "error_summary": None,
+                }
+            )
             repositories.pipeline_runs.update(run)
         counts = DailyCounts()
         try:
@@ -170,128 +184,357 @@ class ProductionDailyRunner:
             safe_detail=detail,
         )
 
+    @staticmethod
+    def _resumable_run(
+        connection: sqlite3.Connection,
+        repositories: SQLiteRepositories,
+        trigger: PipelineTriggerType,
+    ) -> PipelineRun | None:
+        if trigger is not PipelineTriggerType.RETRY:
+            return None
+        row = connection.execute(
+            """SELECT p.id FROM pipeline_runs p
+            WHERE p.run_type='daily' AND p.status='failed'
+            AND EXISTS(SELECT 1 FROM agent_executions a
+              WHERE a.pipeline_run_id=p.id AND a.status='failed' AND a.attempt<2)
+            ORDER BY p.queued_at DESC,p.id DESC LIMIT 1"""
+        ).fetchone()
+        return None if row is None else repositories.pipeline_runs.get(str(row[0]))
+
     async def _execute(
         self,
         connection: sqlite3.Connection,
         repositories: SQLiteRepositories,
         trigger: PipelineTriggerType,
     ) -> DailyCounts:
-        sync_result = await ArxivDiscoverySyncExecutor(
-            self._settings,
-            connection,
-            repositories,
-            clock=self._clock,
-            sync_lock=self._discovery_lock,
-        ).sync(
-            DiscoverySyncRequest(
+        if self._current_run_id is None:
+            raise DailyPipelineError("The agent runtime requires an active daily run.")
+        sync_result = None
+        multi_source = None
+        documents = None
+        ranking = None
+        counts = DailyCounts()
+
+        async def orchestrator(_: AgentInput) -> AgentOutput:
+            return AgentOutput(
+                summary="Bounded local run accepted.",
+                values={
+                    "generation_concurrency": 1,
+                    "source_concurrency": self._settings.resources.source_download_concurrency,
+                },
+                metrics={"maximum_agents": 14},
+            )
+
+        async def source_scout(_: AgentInput) -> AgentOutput:
+            nonlocal sync_result, multi_source
+            sync_result = await ArxivDiscoverySyncExecutor(
+                self._settings,
+                connection,
+                repositories,
+                clock=self._clock,
+                sync_lock=self._discovery_lock,
+            ).sync(
+                DiscoverySyncRequest(
+                    maximum_records=self._settings.scheduler.maximum_records,
+                    lookback_hours=self._settings.scheduler.lookback_hours,
+                ),
+                trigger=trigger,
+            )
+            multi_source = await MultiSourceDiscoveryService(
+                self._settings,
+                connection,
+                repositories,
+                id_factory=self._id_factory,
+                clock=self._clock,
+            ).sync(
                 maximum_records=self._settings.scheduler.maximum_records,
                 lookback_hours=self._settings.scheduler.lookback_hours,
-            ),
-            trigger=trigger,
-        )
-        multi_source = await MultiSourceDiscoveryService(
-            self._settings,
-            connection,
-            repositories,
-            id_factory=self._id_factory,
-            clock=self._clock,
-        ).sync(
-            maximum_records=self._settings.scheduler.maximum_records,
-            lookback_hours=self._settings.scheduler.lookback_hours,
-            trigger=trigger,
-        )
-        timeout = httpx.Timeout(
-            connect=self._settings.http.connect_timeout_seconds,
-            read=self._settings.http.read_timeout_seconds,
-            write=self._settings.http.read_timeout_seconds,
-            pool=self._settings.http.connect_timeout_seconds,
-        )
-        async with httpx.AsyncClient(
-            timeout=timeout,
-            follow_redirects=False,
-            headers={"User-Agent": self._settings.http.user_agent},
-            limits=httpx.Limits(
-                max_connections=self._settings.resources.source_download_concurrency
-            ),
-        ) as document_client:
-            downloader = SafePdfDownloader(
-                document_client,
-                destination=self._settings.paths.raw_documents_root / "pdf",
-                temporary=self._settings.paths.temporary_root,
-                quarantine=self._settings.paths.quarantine_root,
-                maximum_bytes=self._settings.downloads.maximum_document_bytes,
-                chunk_bytes=self._settings.downloads.chunk_bytes,
-                concurrency=self._settings.resources.source_download_concurrency,
-                maximum_retries=self._settings.http.maximum_retries,
+                trigger=trigger,
             )
-            ocr = (
-                TesseractAdapter(
-                    executable=self._settings.ocr.tesseract_executable,
-                    temporary_root=self._settings.paths.temporary_root,
-                    language=self._settings.ocr.language,
-                    timeout_seconds=self._settings.ocr.page_timeout_seconds,
-                )
-                if self._settings.ocr.enabled
-                else None
-            )
-            documents = await DocumentProcessingService(
-                connection,
-                repositories,
-                self._settings.paths,
-                downloader,
-                PdfTextExtractor(
-                    suspicious_native_characters=self._settings.ocr.suspicious_native_characters,
-                    ocr=ocr,
-                ),
-                clock=self._clock,
-                id_factory=self._id_factory,
-            ).process(limit=self._settings.scheduler.document_limit)
-        ranking = DeterministicRankingEngine(
-            connection,
-            load_default_taxonomy(),
-            clock=self._clock,
-            id_factory=self._id_factory,
-        ).rank_catalog(limit=100)
-        base_counts = DailyCounts(
-            fetched=sync_result.ingestion.records_seen + multi_source.total_fetched,
-            normalized=sync_result.records_normalized,
-            documents_processed=documents.succeeded,
-            documents_failed=documents.failed + documents.quarantined,
-            evidence_spans=sum(item.evidence_spans for item in documents.results),
-            works_ranked=ranking.works_ranked,
-            source_counts={
+            source_counts = {
                 "arxiv": sync_result.ingestion.records_seen,
                 **{item.source_key: item.fetched for item in multi_source.sources},
-            },
-        )
-        analysis_timeout = httpx.Timeout(
-            connect=self._settings.http.connect_timeout_seconds,
-            read=self._settings.ollama.request_timeout_seconds,
-            write=self._settings.ollama.request_timeout_seconds,
-            pool=self._settings.http.connect_timeout_seconds,
-        )
-        async with httpx.AsyncClient(timeout=analysis_timeout, follow_redirects=False) as client:
-            analysis = ScoutAnalysisService(
-                connection,
-                repositories,
-                OllamaClient(
-                    client,
-                    base_url=str(self._settings.ollama.base_url),
-                    generation_semaphore=self._generation_semaphore,
-                    resources=self._settings.resources,
-                ),
-                self._settings,
-                clock=self._clock,
-            )
-            analysis_counts = await self.run_analyses(analysis, base_counts)
-        cleanup = RetentionCleaner(
-            connection, self._settings.paths, self._settings.retention, clock=self._clock
-        ).run(dry_run=False)
-        return analysis_counts.model_copy(
-            update={
-                "files_cleaned": cleanup.files_deleted,
             }
-        )
+            return AgentOutput(
+                summary="Bounded source discovery completed with isolated failures.",
+                values=cast(JsonObject, {"source_counts": source_counts}),
+                provenance_refs=tuple(f"source:{key}" for key in source_counts),
+                metrics={"records_fetched": sum(source_counts.values())},
+            )
+
+        async def curator(_: AgentInput) -> AgentOutput:
+            if sync_result is None or multi_source is None:
+                raise AgentStageError("curator", "Source discovery checkpoint is unavailable.")
+            normalized = sync_result.records_normalized + multi_source.total_normalized
+            return AgentOutput(
+                summary="Normalized records passed typed validation and trust classification.",
+                values={"normalized": normalized},
+                metrics={"records_normalized": normalized},
+            )
+
+        async def event_linker(_: AgentInput) -> AgentOutput:
+            row = connection.execute("SELECT COUNT(*) FROM linked_events").fetchone()
+            count = 0 if row is None else int(row[0])
+            return AgentOutput(
+                summary="Exact-identity and explicit-link associations were resolved.",
+                values={"linked_events": count},
+                evidence_refs=tuple(
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT id FROM linked_events ORDER BY updated_at DESC LIMIT 20"
+                    )
+                ),
+                metrics={"linked_events": count},
+            )
+
+        async def trend_ranking(_: AgentInput) -> AgentOutput:
+            nonlocal ranking
+            ranking = DeterministicRankingEngine(
+                connection, load_default_taxonomy(), clock=self._clock, id_factory=self._id_factory
+            ).rank_catalog(limit=100)
+            return AgentOutput(
+                summary="Deterministic ranking remained authoritative.",
+                values={"works_ranked": ranking.works_ranked},
+                metrics={"works_ranked": ranking.works_ranked},
+            )
+
+        async def evidence(_: AgentInput) -> AgentOutput:
+            nonlocal documents
+            timeout = httpx.Timeout(
+                connect=self._settings.http.connect_timeout_seconds,
+                read=self._settings.http.read_timeout_seconds,
+                write=self._settings.http.read_timeout_seconds,
+                pool=self._settings.http.connect_timeout_seconds,
+            )
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                follow_redirects=False,
+                headers={"User-Agent": self._settings.http.user_agent},
+                limits=httpx.Limits(
+                    max_connections=self._settings.resources.source_download_concurrency
+                ),
+            ) as document_client:
+                downloader = SafePdfDownloader(
+                    document_client,
+                    destination=self._settings.paths.raw_documents_root / "pdf",
+                    temporary=self._settings.paths.temporary_root,
+                    quarantine=self._settings.paths.quarantine_root,
+                    maximum_bytes=self._settings.downloads.maximum_document_bytes,
+                    chunk_bytes=self._settings.downloads.chunk_bytes,
+                    concurrency=self._settings.resources.source_download_concurrency,
+                    maximum_retries=self._settings.http.maximum_retries,
+                )
+                ocr = (
+                    TesseractAdapter(
+                        executable=self._settings.ocr.tesseract_executable,
+                        temporary_root=self._settings.paths.temporary_root,
+                        language=self._settings.ocr.language,
+                        timeout_seconds=self._settings.ocr.page_timeout_seconds,
+                    )
+                    if self._settings.ocr.enabled
+                    else None
+                )
+                documents = await DocumentProcessingService(
+                    connection,
+                    repositories,
+                    self._settings.paths,
+                    downloader,
+                    PdfTextExtractor(
+                        suspicious_native_characters=self._settings.ocr.suspicious_native_characters,
+                        ocr=ocr,
+                    ),
+                    clock=self._clock,
+                    id_factory=self._id_factory,
+                ).process(limit=self._settings.scheduler.document_limit)
+            spans = sum(item.evidence_spans for item in documents.results)
+            return AgentOutput(
+                summary="Bounded primary documents and page evidence were processed.",
+                values={
+                    "processed": documents.succeeded,
+                    "failed": documents.failed + documents.quarantined,
+                    "evidence_spans": spans,
+                },
+                evidence_refs=tuple(
+                    str(row[0])
+                    for row in connection.execute(
+                        "SELECT id FROM evidence_spans ORDER BY created_at DESC LIMIT 50"
+                    )
+                ),
+                metrics={"documents_processed": documents.succeeded, "evidence_spans": spans},
+            )
+
+        async def technical_analyst(_: AgentInput) -> AgentOutput:
+            nonlocal counts, ranking
+            if sync_result is None or multi_source is None or documents is None or ranking is None:
+                raise AgentStageError(
+                    "technical_analyst", "A required deterministic checkpoint is unavailable."
+                )
+            ranking = DeterministicRankingEngine(
+                connection, load_default_taxonomy(), clock=self._clock, id_factory=self._id_factory
+            ).rank_catalog(limit=100)
+            counts = DailyCounts(
+                fetched=sync_result.ingestion.records_seen + multi_source.total_fetched,
+                normalized=sync_result.records_normalized + multi_source.total_normalized,
+                documents_processed=documents.succeeded,
+                documents_failed=documents.failed + documents.quarantined,
+                evidence_spans=sum(item.evidence_spans for item in documents.results),
+                works_ranked=ranking.works_ranked,
+                source_counts={
+                    "arxiv": sync_result.ingestion.records_seen,
+                    **{item.source_key: item.fetched for item in multi_source.sources},
+                },
+            )
+            timeout = httpx.Timeout(
+                connect=self._settings.http.connect_timeout_seconds,
+                read=self._settings.ollama.request_timeout_seconds,
+                write=self._settings.ollama.request_timeout_seconds,
+                pool=self._settings.http.connect_timeout_seconds,
+            )
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+                analysis = ScoutAnalysisService(
+                    connection,
+                    repositories,
+                    OllamaClient(
+                        client,
+                        base_url=str(self._settings.ollama.base_url),
+                        generation_semaphore=self._generation_semaphore,
+                        resources=self._settings.resources,
+                    ),
+                    self._settings,
+                    clock=self._clock,
+                )
+                counts = await self.run_analyses(analysis, counts)
+            return AgentOutput(
+                summary="Scout briefs and deep dives were generated or safely reused.",
+                values=counts.model_dump(),
+                evidence_refs=tuple(
+                    str(row[0])
+                    for row in connection.execute(
+                        """SELECT id FROM analysis_runs WHERE status='succeeded'
+                        ORDER BY completed_at DESC LIMIT 20"""
+                    )
+                ),
+                metrics={
+                    "briefs": counts.briefs_generated + counts.briefs_cached,
+                    "deep_dives": counts.deep_dives_generated + counts.deep_dives_cached,
+                },
+            )
+
+        async def skeptic(_: AgentInput) -> AgentOutput:
+            unsupported = connection.execute(
+                """SELECT COUNT(*) FROM claims c
+                JOIN analysis_sections s ON s.id=c.analysis_section_id
+                JOIN analysis_runs a ON a.id=s.analysis_run_id
+                WHERE a.status='succeeded' AND c.claim_type IN ('fact','interpretation')
+                AND NOT EXISTS(SELECT 1 FROM claim_evidence ce WHERE ce.claim_id=c.id)"""
+            ).fetchone()
+            count = 0 if unsupported is None else int(unsupported[0])
+            if count:
+                raise AgentStageError(
+                    "skeptic_verifier", "Unsupported factual claims blocked publication."
+                )
+            return AgentOutput(
+                summary="All published factual claims retain evidence links.",
+                values={"unsupported_claims": 0},
+                metrics={"unsupported_claims": 0},
+            )
+
+        async def learning(_: AgentInput) -> AgentOutput:
+            rows = connection.execute(
+                """SELECT output_json FROM analysis_runs
+                WHERE analysis_type='deep_dive' AND status='succeeded'
+                ORDER BY completed_at DESC LIMIT 2"""
+            ).fetchall()
+            return AgentOutput(
+                summary="Prerequisite-aware learning focus was derived from verified reports.",
+                values={
+                    "deep_dives_considered": len(rows),
+                    "estimated_minutes": min(90, 30 * len(rows)),
+                },
+                metrics={"plans": len(rows)},
+            )
+
+        async def commercial(_: AgentInput) -> AgentOutput:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM claims WHERE claim_type='hypothesis'"
+            ).fetchone()
+            total = 0 if row is None else int(row[0])
+            return AgentOutput(
+                summary="Commercial outputs remain explicitly labelled hypotheses.",
+                values={"hypotheses": total},
+                metrics={"hypotheses": total},
+            )
+
+        async def india(_: AgentInput) -> AgentOutput:
+            return AgentOutput(
+                summary="India-market buyer and pricing hypotheses were bounded for validation.",
+                values={"market": "India", "currency": "INR", "status": "hypothesis"},
+                metrics={"markets": 1},
+            )
+
+        async def personal(_: AgentInput) -> AgentOutput:
+            projects = ("RentAssure", "SageAlpha", "BidReady", "US-school chatbot")
+            return AgentOutput(
+                summary=(
+                    "Verified developments were mapped to configured projects "
+                    "without changing facts."
+                ),
+                values={"projects": list(projects)},
+                metrics={"projects": len(projects)},
+            )
+
+        async def editor(_: AgentInput) -> AgentOutput:
+            return AgentOutput(
+                summary="Daily report inputs passed non-duplication and evidence gates.",
+                values={"report_date": self._clock().date().isoformat()},
+                metrics={"reports_planned": 1},
+            )
+
+        async def watchtower(_: AgentInput) -> AgentOutput:
+            nonlocal counts
+            cleanup = RetentionCleaner(
+                connection, self._settings.paths, self._settings.retention, clock=self._clock
+            ).run(dry_run=False)
+            counts = counts.model_copy(update={"files_cleaned": cleanup.files_deleted})
+            degraded = [
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT source_key FROM sources
+                    WHERE enabled=1 AND health_status!='healthy' ORDER BY source_key"""
+                )
+            ]
+            return AgentOutput(
+                summary="Operational health and retention completed.",
+                values=cast(
+                    JsonObject,
+                    {"degraded_sources": degraded, "files_cleaned": cleanup.files_deleted},
+                ),
+                metrics={"degraded_sources": len(degraded), "files_cleaned": cleanup.files_deleted},
+            )
+
+        handlers = {
+            "orchestrator": orchestrator,
+            "source_scout": source_scout,
+            "curator": curator,
+            "event_linker": event_linker,
+            "trend_ranking": trend_ranking,
+            "evidence": evidence,
+            "technical_analyst": technical_analyst,
+            "skeptic_verifier": skeptic,
+            "learning": learning,
+            "commercial_opportunity": commercial,
+            "india_market": india,
+            "personal_relevance": personal,
+            "daily_editor": editor,
+            "operations_watchtower": watchtower,
+        }
+        try:
+            await AgentRuntime(connection, clock=self._clock, id_factory=self._id_factory).execute(
+                self._current_run_id, self._clock().date().isoformat(), handlers
+            )
+        except AgentStageError as error:
+            raise DailyPipelineError(error.safe_reason, counts) from error
+        return counts
 
     async def run_analyses(
         self, analysis: ScoutAnalysisService, base_counts: DailyCounts

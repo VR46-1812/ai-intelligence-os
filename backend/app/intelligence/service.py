@@ -6,19 +6,24 @@ import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
+from typing import cast
 
 from app.analysis.models import AnalysisResult, DeepDiveReport, FastBrief
 from app.analysis.service import AnalysisServiceError, ScoutAnalysisService
 from app.catalog.identity import new_ulid
 from app.db import transaction
-from app.domain.models import AnalysisStatus, AnalysisType
+from app.domain.models import AnalysisStatus, AnalysisType, JsonObject
 from app.intelligence.models import (
+    CommercialHypothesis,
     DailyIntelligenceReport,
     DeepDiveProgress,
+    LearningPlanItem,
     ModelRankingSignal,
     Opportunity,
     PipelineReportSummary,
+    ProjectRelevance,
     RankedReportItem,
+    SourceCoverage,
     StageState,
     TopicOverview,
     TopicPaper,
@@ -387,6 +392,130 @@ class IntelligenceOutputService:
             counts_raw.get("deep_dives_cached", 0)
         )
         failed = int(counts_raw.get("documents_failed", 0))
+        learning_focus = self._learning_focus()
+        coverage_gaps = self._coverage_gaps()
+        happened = tuple(
+            str(row[0])
+            for row in self._connection.execute(
+                "SELECT title FROM linked_events ORDER BY occurred_at DESC,id LIMIT 8"
+            )
+        )
+        launches = tuple(
+            str(row[0])
+            for row in self._connection.execute(
+                """SELECT title FROM source_artifacts
+                WHERE artifact_type IN ('repository','release','model','dataset','space')
+                ORDER BY COALESCE(updated_at,published_at,created_at) DESC LIMIT 8"""
+            )
+        )
+        community = tuple(
+            str(row[0])
+            for row in self._connection.execute(
+                """SELECT title FROM source_artifacts
+                WHERE content_class='community_reaction' OR authority<0.5
+                ORDER BY COALESCE(updated_at,published_at,created_at) DESC LIMIT 8"""
+            )
+        )
+        learning_plan = tuple(
+            LearningPlanItem(
+                topic=topic,
+                prerequisites=("Read the cited primary source", "Review the stored evidence spans"),
+                estimated_minutes=45,
+                recommended_item=technical[0].title if technical else "No ranked item available",
+                exercise="Reproduce one bounded claim with a local fixture and record the result.",
+                evidence_ids=(
+                    ()
+                    if not technical or technical[0].model_signal is None
+                    else technical[0].model_signal.evidence_ids
+                ),
+            )
+            for topic in learning_focus[:3]
+        )
+
+        def evidence_for_work(item: RankedReportItem) -> tuple[str, ...]:
+            if item.model_signal is not None and item.model_signal.evidence_ids:
+                return item.model_signal.evidence_ids
+            return tuple(
+                str(row[0])
+                for row in self._connection.execute(
+                    """SELECT e.id FROM evidence_spans e
+                    JOIN documents d ON d.id=e.document_id
+                    JOIN work_versions v ON v.id=d.work_version_id
+                    WHERE v.work_id=? ORDER BY e.page_start,e.id LIMIT 3""",
+                    (item.work_id,),
+                )
+            )
+
+        commercial_hypotheses = tuple(
+            CommercialHypothesis(
+                label="commercial_hypothesis",
+                problem=f"Teams lack validated operational guidance for {item.title}.",
+                target_buyer="Indian mid-market AI and software teams",
+                proposed_offer=(
+                    "A paid validation pilot with evidence-backed implementation guidance."
+                ),
+                supporting_evidence=evidence_for_work(item),
+                prototype="Build one local bounded workflow around the verified capability.",
+                effort="Two to five engineering days for a validation prototype.",
+                validation_experiment=(
+                    "Interview five buyers and run one paid or letter-of-intent pilot."
+                ),
+                pricing_hypothesis=(
+                    "INR 50,000-200,000 pilot; validate willingness to pay before quoting."
+                ),
+                competition="Existing consulting, internal engineering, and adjacent AI tooling.",
+                risks=("Evidence may not transfer to production.", "Buyer urgency is unvalidated."),
+                confidence=min(0.75, 0.35 + item.score / 250),
+            )
+            for item in commercial
+            if evidence_for_work(item)
+        )
+        commercial_hypotheses = commercial_hypotheses[:3]
+        projects = ("RentAssure", "SageAlpha", "BidReady", "US-school chatbot")
+        project_relevance = tuple(
+            ProjectRelevance(
+                project=project,
+                relevance=(
+                    f"Evaluate {technical[0].title} against this project's current retrieval, "
+                    "agent, or reliability constraints."
+                    if technical
+                    else "No verified development is available for project mapping."
+                ),
+                evidence_ids=(
+                    ()
+                    if not technical or technical[0].model_signal is None
+                    else technical[0].model_signal.evidence_ids
+                ),
+            )
+            for project in projects
+        )
+        raw_source_counts = counts_raw.get("source_counts", {})
+        source_count_values = (
+            cast(JsonObject, raw_source_counts) if isinstance(raw_source_counts, dict) else {}
+        )
+        source_counts = {
+            key: value
+            for key, value in source_count_values.items()
+            if isinstance(value, int) and not isinstance(value, bool)
+        }
+        source_coverage = tuple(
+            SourceCoverage(
+                source_key=str(row[0]),
+                records=int(source_counts.get(str(row[0]), 0)),
+                status=str(row[1]),
+            )
+            for row in self._connection.execute(
+                "SELECT source_key,health_status FROM sources ORDER BY source_key"
+            )
+        )
+        agent_health = {
+            str(row[0]): str(row[1])
+            for row in self._connection.execute(
+                """SELECT agent_id,status FROM agent_executions
+                WHERE pipeline_run_id=? ORDER BY stage_order""",
+                (run["id"],),
+            )
+        }
         report = DailyIntelligenceReport(
             schema_version="1.0",
             report_date=str(run["completed_at"])[:10],
@@ -405,8 +534,38 @@ class IntelligenceOutputService:
             top_commercial=commercial,
             deep_dives=tuple(str(row[0]) for row in deep_rows),
             important_updates=self._updates(),
-            learning_focus=self._learning_focus(),
-            coverage_gaps=self._coverage_gaps(),
+            learning_focus=learning_focus,
+            coverage_gaps=coverage_gaps,
+            executive_briefing=(
+                f"{len(happened)} linked developments were reviewed; "
+                f"{len(technical)} technical priorities and {len(commercial_hypotheses)} "
+                "commercial hypotheses passed deterministic assembly."
+            ),
+            what_happened=happened,
+            why_it_matters=tuple(item.reason for item in technical[:5]),
+            evidence_versus_interpretation=(
+                "Facts require stored evidence; interpretations remain labelled and subordinate.",
+                "Community and promotional signals cannot establish primary technical claims.",
+            ),
+            research_and_product_launches=launches,
+            community_signals=community,
+            learning_plan=learning_plan,
+            what_to_build=tuple(
+                f"Prototype one bounded integration for {item.title}." for item in technical[:3]
+            ),
+            commercial_hypotheses=commercial_hypotheses,
+            india_market_hypotheses=tuple(
+                hypothesis.pricing_hypothesis for hypothesis in commercial_hypotheses
+            ),
+            personal_relevance=project_relevance,
+            risks_and_unknowns=tuple(
+                dict.fromkeys(
+                    (*coverage_gaps, "Commercial demand and pricing require buyer validation.")
+                )
+            ),
+            watchlist_changes=launches[:5],
+            source_coverage=source_coverage,
+            agent_health=agent_health,
         )
         payload = report.model_dump_json()
         fingerprint = hashlib.sha256(payload.encode()).hexdigest()

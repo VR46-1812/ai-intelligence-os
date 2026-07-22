@@ -40,8 +40,10 @@ test("Today shows local model state and a citation-verified brief", async ({ pag
   await expect(page.getByText("100% citation coverage")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Published intelligence" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Open verified deep dive/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Commercial opportunities" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What Happened" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Learn", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Build", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Earn", exact: true })).toBeVisible();
   await expect(page.getByText("github · 50% corroboration")).toBeVisible();
 });
 

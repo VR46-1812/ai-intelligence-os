@@ -19,9 +19,12 @@ export interface LinkedSourceEvidence {
   readonly artifact_id: string;
   readonly source_key: string;
   readonly artifact_type: string;
+  readonly source_type?: string;
   readonly title: string;
   readonly canonical_url: string;
   readonly relationship: string;
+  readonly confidence?: number;
+  readonly matching_evidence?: readonly string[];
   readonly content_class: "fact" | "interpretation" | "community_reaction" | "commercial_hypothesis";
   readonly authority: number;
   readonly freshness: number;
@@ -97,6 +100,10 @@ export interface CatalogQuery {
   readonly q: string;
   readonly topic: string;
   readonly source: string;
+  readonly sourceType?: string;
+  readonly minimumAuthority?: string;
+  readonly minimumCorroboration?: string;
+  readonly linkedOnly?: boolean;
   readonly publishedFrom: string;
   readonly publishedTo: string;
   readonly sort: "newest" | "oldest" | "title" | "updated" | "technical" | "commercial" | "deep_dive";
@@ -157,6 +164,7 @@ function isTopic(value: unknown): value is CatalogTopic {
 function isLinkedSource(value: unknown): value is LinkedSourceEvidence {
   return isRecord(value) && typeof value.artifact_id === "string" &&
     typeof value.source_key === "string" && typeof value.artifact_type === "string" &&
+    (value.source_type === undefined || typeof value.source_type === "string") &&
     typeof value.title === "string" && typeof value.canonical_url === "string" &&
     typeof value.relationship === "string" && typeof value.content_class === "string" &&
     typeof value.authority === "number" && typeof value.freshness === "number" &&
@@ -267,6 +275,10 @@ export function buildCatalogUrl(apiBaseUrl: string, query: CatalogQuery): string
   if (query.q) parameters.set("q", query.q);
   if (query.topic) parameters.set("topic", query.topic);
   if (query.source) parameters.set("source", query.source);
+  if (query.sourceType) parameters.set("source_type", query.sourceType);
+  if (query.minimumAuthority) parameters.set("minimum_authority", query.minimumAuthority);
+  if (query.minimumCorroboration) parameters.set("minimum_corroboration", query.minimumCorroboration);
+  if (query.linkedOnly) parameters.set("linked_only", "true");
   if (query.publishedFrom) parameters.set("published_from", query.publishedFrom);
   if (query.publishedTo) parameters.set("published_to", query.publishedTo);
   return `${apiBaseUrl}/items?${parameters.toString()}`;

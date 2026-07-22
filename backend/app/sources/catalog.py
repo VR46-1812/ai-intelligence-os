@@ -79,7 +79,7 @@ def upsert_multisource_registry(
     id_factory: Callable[[], str] = new_ulid,
 ) -> tuple[Source, ...]:
     """Persist the V1.1 connector registry without source-specific orchestration branches."""
-    definitions: tuple[tuple[str, str, str | None, bool, str, int, JsonObject], ...] = (
+    definitions: tuple[tuple[str, str, str | None, bool, str, int, TrustTier, JsonObject], ...] = (
         (
             "openreview",
             "OpenReview",
@@ -87,6 +87,7 @@ def upsert_multisource_registry(
             settings.openreview_enabled,
             OpenReviewConnector.connector_version,
             1000,
+            TrustTier.A,
             {"venues": list(settings.openreview_venues)},
         ),
         (
@@ -96,7 +97,12 @@ def upsert_multisource_registry(
             settings.github_enrichment_enabled,
             GitHubConnector.connector_version,
             250,
-            {"enrichment_only": True},
+            TrustTier.A,
+            {
+                "enrichment_only": False,
+                "watchlist": list(settings.github_watchlist),
+                "search_queries": list(settings.github_search_queries),
+            },
         ),
         (
             "huggingface",
@@ -105,6 +111,7 @@ def upsert_multisource_registry(
             settings.huggingface_enabled,
             HuggingFaceConnector.connector_version,
             250,
+            TrustTier.A,
             {"kinds": ["models", "datasets", "spaces"]},
         ),
         (
@@ -114,11 +121,72 @@ def upsert_multisource_registry(
             settings.rss_enabled,
             RssAtomConnector.connector_version,
             500,
+            TrustTier.A,
             {"feeds": list(settings.rss_feeds)},
+        ),
+        (
+            "youtube",
+            "YouTube research metadata",
+            "https://www.youtube.com",
+            bool(settings.youtube_feeds),
+            RssAtomConnector.connector_version,
+            1000,
+            TrustTier.C,
+            {"feeds": list(settings.youtube_feeds), "transcripts": "publisher-provided-only"},
+        ),
+        (
+            "reddit",
+            "Reddit public feeds",
+            "https://www.reddit.com",
+            bool(settings.reddit_feeds),
+            RssAtomConnector.connector_version,
+            2000,
+            TrustTier.D,
+            {"feeds": list(settings.reddit_feeds)},
+        ),
+        (
+            "medium",
+            "Medium public feeds",
+            "https://medium.com",
+            bool(settings.medium_feeds),
+            RssAtomConnector.connector_version,
+            1000,
+            TrustTier.C,
+            {"feeds": list(settings.medium_feeds)},
+        ),
+        (
+            "substack",
+            "Substack public feeds",
+            "https://substack.com",
+            bool(settings.substack_feeds),
+            RssAtomConnector.connector_version,
+            1000,
+            TrustTier.C,
+            {"feeds": list(settings.substack_feeds)},
+        ),
+        (
+            "watchlist",
+            "Configured researcher and company feeds",
+            "https://example.invalid/watchlist",
+            bool(settings.watchlist_feeds),
+            RssAtomConnector.connector_version,
+            1000,
+            TrustTier.B,
+            {"feeds": list(settings.watchlist_feeds)},
+        ),
+        (
+            "x-watchlist",
+            "User-supplied X watchlist exports",
+            "https://x.com",
+            False,
+            "x-export-v1",
+            0,
+            TrustTier.D,
+            {"mode": "user_supplied_export"},
         ),
     )
     registered: list[Source] = []
-    for key, name, base_url, enabled, version, interval, config in definitions:
+    for key, name, base_url, enabled, version, interval, trust_tier, config in definitions:
         existing = repository.get_by_key(key)
         health = SourceHealth.UNKNOWN if enabled else SourceHealth.DISABLED
         if existing is None:
@@ -128,7 +196,7 @@ def upsert_multisource_registry(
                         id=id_factory(),
                         source_key=key,
                         display_name=name,
-                        trust_tier=TrustTier.A,
+                        trust_tier=trust_tier,
                         base_url=base_url,
                         enabled=enabled,
                         poll_interval_minutes=60,
@@ -149,7 +217,7 @@ def upsert_multisource_registry(
                 existing.model_copy(
                     update={
                         "display_name": name,
-                        "trust_tier": TrustTier.A,
+                        "trust_tier": trust_tier,
                         "base_url": base_url,
                         "enabled": enabled,
                         "minimum_request_interval_ms": interval,

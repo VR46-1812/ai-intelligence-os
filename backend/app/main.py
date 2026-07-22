@@ -9,11 +9,14 @@ from enum import StrEnum
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
+from app.agents.api import router as agents_router
 from app.analysis.api import router as analysis_router
 from app.catalog.api import router as catalog_router
 from app.catalog.taxonomy import TopicTaxonomyService, load_default_taxonomy
 from app.config import AppSettings, initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase, transaction
+from app.db.backup import backup_database
+from app.db.migrations import discover_migrations
 from app.discovery.api import public_router as public_discovery_router
 from app.discovery.api import router as discovery_router
 from app.documents.api import router as documents_router
@@ -69,6 +72,33 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
         initialize_directories(resolved_settings.paths)
+        if database.path.is_file():
+            connection = database.connect()
+            try:
+                has_history = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+                ).fetchone()
+                current_version = (
+                    0
+                    if has_history is None
+                    else int(
+                        connection.execute(
+                            "SELECT COALESCE(MAX(version),0) FROM schema_migrations"
+                        ).fetchone()[0]
+                    )
+                )
+            finally:
+                connection.close()
+            target_version = discover_migrations()[-1].version
+            if 0 < current_version < target_version:
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+                backup_database(
+                    database,
+                    resolved_settings.paths.data_root
+                    / "backups"
+                    / f"pre-migration-v{target_version}-{stamp}.db",
+                    resolved_settings.paths.data_root,
+                )
         MigrationRunner(database).migrate()
         connection = database.connect()
         try:
@@ -122,6 +152,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.include_router(intelligence_router)
     application.include_router(operations_router)
     application.include_router(multisource_router)
+    application.include_router(agents_router)
 
     return application
 

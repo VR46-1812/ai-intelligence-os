@@ -380,13 +380,20 @@ def test_v1_human_review_cases_are_independent_and_cover_release_risks() -> None
     review = load_human_review_set()
     categories = {case.category for case in review.cases}
 
-    assert review.version == "1.0.0" and len(review.cases) >= 10
+    assert review.version == "1.0.0" and len(review.cases) >= 20
     assert len({case.id for case in review.cases}) == len(review.cases)
     assert categories == {
         "ranking_relevance",
         "unsupported_claims",
         "citation_correctness",
         "commercial_hypothesis_labeling",
+        "source_relevance",
+        "duplicate_event_prevention",
+        "false_cross_source_merge_prevention",
+        "research_versus_opinion",
+        "learning_path_usefulness",
+        "india_market_relevance",
+        "personal_project_relevance",
     }
     assert all(case.input_summary != case.pass_criteria for case in review.cases)
 

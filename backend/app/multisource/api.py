@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.models import PipelineTriggerType
-from app.multisource.models import LinkedEventPage, MultiSourceSyncResult
+from app.multisource.models import LinkedEventPage, MultiSourceSyncResult, SourceSyncCount
 from app.multisource.service import LinkedEventReader, MultiSourceDiscoveryService
 from app.repositories import SQLiteRepositories
 
@@ -33,6 +34,25 @@ class RegistrySource(BaseModel):
     health: str
     checkpoint: dict[str, object] | None
     minimum_request_interval_ms: int
+
+
+class ManualUnlinkRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    reason: str = Field(min_length=3, max_length=240)
+
+
+class XExportItem(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str = Field(min_length=1, max_length=100)
+    text: str = Field(min_length=1, max_length=5000)
+    url: str = Field(pattern=r"^https://(x\.com|twitter\.com)/")
+    created_at: str
+    author: str | None = Field(default=None, max_length=200)
+
+
+class XExportRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    items: tuple[XExportItem, ...] = Field(min_length=1, max_length=5)
 
 
 @router.get("/sources/registry", response_model=tuple[RegistrySource, ...])
@@ -97,6 +117,19 @@ async def sync_multi_sources(
             connection.close()
 
 
+@router.post("/sources/x-import", response_model=SourceSyncCount)
+async def import_x_export(body: XExportRequest, request: Request) -> SourceSyncCount:
+    connection = request.app.state.database.connect()
+    try:
+        return await MultiSourceDiscoveryService(
+            request.app.state.settings,
+            connection,
+            SQLiteRepositories.for_connection(connection),
+        ).import_x_export(tuple(item.model_dump() for item in body.items))
+    finally:
+        connection.close()
+
+
 @router.get("/events", response_model=LinkedEventPage)
 async def linked_events(
     request: Request,
@@ -107,5 +140,24 @@ async def linked_events(
     connection = request.app.state.database.connect()
     try:
         return LinkedEventReader(connection).list(limit=limit, offset=offset, source=source)
+    finally:
+        connection.close()
+
+
+@router.post("/events/{event_id}/artifacts/{artifact_id}/unlink", status_code=204)
+async def unlink_event_artifact(
+    event_id: str, artifact_id: str, body: ManualUnlinkRequest, request: Request
+) -> None:
+    connection = request.app.state.database.connect()
+    try:
+        with connection:
+            changed = LinkedEventReader(connection).unlink(
+                event_id,
+                artifact_id,
+                body.reason,
+                corrected_at=datetime.now(UTC),
+            )
+        if not changed:
+            raise HTTPException(status_code=404, detail="Linked source association not found.")
     finally:
         connection.close()

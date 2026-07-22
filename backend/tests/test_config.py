@@ -55,6 +55,9 @@ def test_default_settings_encode_hard_resource_policy() -> None:
     assert settings.sources.huggingface_enabled is True
     assert settings.sources.rss_enabled is True
     assert all(feed.startswith("https://") for feed in settings.sources.rss_feeds)
+    assert settings.sources.reddit_feeds == ("https://www.reddit.com/r/LocalLLaMA/.rss",)
+    assert settings.sources.github_search_queries == ("topic:llm stars:>100",)
+    assert settings.sources.youtube_feeds == ()
 
 
 def test_multisource_allowlists_reject_empty_or_insecure_configuration() -> None:
@@ -62,6 +65,12 @@ def test_multisource_allowlists_reject_empty_or_insecure_configuration() -> None
         SourceSettings(openreview_venues=())
     with pytest.raises(ValidationError, match="HTTPS"):
         SourceSettings(rss_feeds=("http://example.test/feed.xml",))
+    with pytest.raises(ValidationError, match="limited to 20"):
+        SourceSettings(
+            watchlist_feeds=tuple(f"https://example.test/{index}" for index in range(21))
+        )
+    with pytest.raises(ValidationError, match="bounded limits"):
+        SourceSettings(github_search_queries=tuple(f"topic:ai-{index}" for index in range(11)))
 
 
 def test_optional_ocr_configuration_is_typed_and_bounded(

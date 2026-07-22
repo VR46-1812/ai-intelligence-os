@@ -6,6 +6,17 @@
   text-rendering: optimizeLegibility;
 }
 
+.agent-graph { display: grid; gap: .65rem; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 1rem 0; }
+.agent-node { align-items: flex-start; background: rgba(255,255,255,.025); border: 1px solid var(--line); border-radius: 14px; display: flex; gap: .8rem; padding: .9rem; }
+.agent-node > span { color: var(--cyan); font: 700 .72rem/1 var(--mono); padding-top: .25rem; }
+.agent-node p { color: var(--muted); font-size: .82rem; margin: .3rem 0; }
+.agent-node small { color: var(--muted); }
+.agent-node.succeeded { border-color: rgba(48, 211, 155, .28); }
+.agent-node.failed { border-color: rgba(255, 107, 129, .45); }
+.agent-failure { color: #ff9aac !important; }
+
+@media (max-width: 720px) { .agent-graph { grid-template-columns: 1fr; } }
+
 .intelligence-page { padding: 34px clamp(20px, 4vw, 56px) 64px; }
 .page-intro { max-width: 760px; margin-bottom: 28px; }
 .page-intro h2 { font-size: clamp(2rem, 4vw, 3.3rem); margin: 5px 0 10px; }

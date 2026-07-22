@@ -77,7 +77,8 @@ test suite performs the same round trip against temporary data.
 The versioned 50-example golden set measures completeness, citation coverage,
 repetition, unsupported-claim rejection, precision@10, and nDCG@10. Twelve
 independently specified operator-review cases are stored in
-`backend/app/intelligence/human_review_v1.json` and exposed at
+`backend/app/intelligence/human_review_v1.json` now contains twenty independently
+specified Weekend Beta cases and is exposed at
 `GET /evaluations/human-review/v1`. Reviewers record pass/fail for each case and
 retain notes outside the immutable fixture.
 
@@ -97,7 +98,8 @@ retain notes outside the immutable fixture.
 
 ## Known non-blocking limitations
 
-V1 is single-user and arXiv-only. It does not enrich GitHub, use OCR, embed the
-catalog, or fetch OpenReview. Commercial hypotheses require human market
-validation. The in-process scheduler runs only while the backend is running;
-Windows Task Scheduler integration is an operator choice for a later release.
+The stable V1 baseline is single-user and local-first. V1.1 and Weekend Beta
+source/agent behavior is documented separately in `docs/V1_1_RELEASE.md` and
+`docs/WEEKEND_BETA.md`. Commercial hypotheses require human market validation.
+The in-process scheduler runs only while the backend is running; Windows Task
+Scheduler integration is an operator choice for a later release.

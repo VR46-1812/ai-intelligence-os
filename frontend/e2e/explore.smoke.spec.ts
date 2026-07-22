@@ -24,6 +24,10 @@ test("Explore loads stored SQLite papers, searches, opens detail, and reports sy
   await expect(page.getByRole("heading", { name: "Explore papers worth understanding." })).toBeVisible();
   await expect(page.locator(".paper-card")).toHaveCount(5);
   await expect(page.getByText(/\d+ stored papers/)).toBeVisible();
+  await expect(page.getByLabel("Source type")).toBeVisible();
+  await expect(page.getByLabel("Minimum authority")).toBeVisible();
+  await expect(page.getByLabel("Minimum corroboration")).toBeVisible();
+  await expect(page.getByLabel("Linked events only")).toBeVisible();
 
   const firstTitle = page.locator(".paper-title").first();
   const title = await firstTitle.textContent();

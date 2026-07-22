@@ -12,6 +12,8 @@ const daily = { scheduler_enabled: true, schedule: "06:00 Asia/Kolkata", running
 
 test("System shows local operations and runs the bounded daily pipeline", async ({ page }) => {
   let runNowCalled = false;
+  await page.route("**/agents/graph", (route) => route.fulfill({ json: Array.from({ length: 14 }, (_, index) => ({ agent_id: `agent_${index + 1}`, version: "1.0", order: index + 1, name: index === 0 ? "Orchestrator Agent" : `Agent ${index + 1}`, responsibility: "Bounded sequential stage", model_assisted: index === 6, prompt_version: index === 6 ? "scout-analysis.v1" : null, budget: { timeout_seconds: 180, maximum_input_tokens: 0, maximum_output_tokens: 0, maximum_ram_mb: 2048, maximum_vram_mb: 0 }, retry: { maximum_attempts: 2, resume_from_checkpoint: true } })) }));
+  await page.route("**/agents/status", (route) => route.fulfill({ json: { pipeline_run_id: "daily-smoke", current_agent: null, latest_success_at: "2026-07-21T00:02:00Z", executions: [{ id: "agent-run-1", agent_id: "agent_1", stage_order: 1, status: "succeeded", attempt: 1, input: { report_date: "2026-07-21" }, output: { summary: "Completed" }, evidence_refs: [], provenance_refs: ["source:arxiv"], metrics: { duration_ms: 12 }, safe_failure_reason: null, started_at: "2026-07-21T00:00:00Z", completed_at: "2026-07-21T00:00:00Z" }], degraded_sources: ["openreview"] } }));
   await page.route("**/system/status", (route) => route.fulfill({ json: {
     daily,
     source: { source_key: "arxiv", health: "healthy", checkpoint: { position: "5" },
@@ -30,12 +32,17 @@ test("System shows local operations and runs the bounded daily pipeline", async 
   await expect(page.getByRole("heading", { name: "Everything running on this machine." })).toBeVisible();
   await expect(page.getByText("Unloaded / on demand")).toBeVisible();
   await expect(page.getByText("6656 MB VRAM target")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agent graph" })).toBeVisible();
+  await expect(page.getByText("14 agents")).toBeVisible();
+  await expect(page.getByText("Degraded sources")).toBeVisible();
   await page.getByRole("button", { name: "Run Now" }).click();
   await expect.poll(() => runNowCalled).toBe(true);
 });
 
 test("System remains readable at mobile width", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/agents/graph", (route) => route.fulfill({ json: [] }));
+  await page.route("**/agents/status", (route) => route.fulfill({ json: { pipeline_run_id: null, current_agent: null, latest_success_at: null, executions: [], degraded_sources: [] } }));
   await page.route("**/system/status", (route) => route.fulfill({ status: 503, json: { detail: "System status temporarily unavailable." } }));
   await page.goto("/#system");
   await expect(page.getByRole("alert")).toContainText("temporarily unavailable");

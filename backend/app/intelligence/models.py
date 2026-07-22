@@ -31,6 +31,42 @@ class RankedReportItem(IntelligenceModel):
     model_signal: ModelRankingSignal | None = None
 
 
+class LearningPlanItem(IntelligenceModel):
+    topic: str
+    prerequisites: tuple[str, ...]
+    estimated_minutes: int = Field(ge=10, le=180)
+    recommended_item: str
+    exercise: str
+    evidence_ids: tuple[str, ...]
+
+
+class CommercialHypothesis(IntelligenceModel):
+    label: str = Field(pattern=r"^commercial_hypothesis$")
+    problem: str
+    target_buyer: str
+    proposed_offer: str
+    supporting_evidence: tuple[str, ...]
+    prototype: str
+    effort: str
+    validation_experiment: str
+    pricing_hypothesis: str
+    competition: str
+    risks: tuple[str, ...]
+    confidence: float = Field(ge=0, le=1)
+
+
+class ProjectRelevance(IntelligenceModel):
+    project: str
+    relevance: str
+    evidence_ids: tuple[str, ...]
+
+
+class SourceCoverage(IntelligenceModel):
+    source_key: str
+    records: int = Field(ge=0)
+    status: str
+
+
 class PipelineReportSummary(IntelligenceModel):
     discovered: int = Field(ge=0)
     normalized: int = Field(ge=0)
@@ -52,6 +88,21 @@ class DailyIntelligenceReport(IntelligenceModel):
     important_updates: tuple[dict[str, str], ...]
     learning_focus: tuple[str, ...]
     coverage_gaps: tuple[str, ...]
+    executive_briefing: str = "No verified briefing is available yet."
+    what_happened: tuple[str, ...] = ()
+    why_it_matters: tuple[str, ...] = ()
+    evidence_versus_interpretation: tuple[str, ...] = ()
+    research_and_product_launches: tuple[str, ...] = ()
+    community_signals: tuple[str, ...] = ()
+    learning_plan: tuple[LearningPlanItem, ...] = ()
+    what_to_build: tuple[str, ...] = ()
+    commercial_hypotheses: tuple[CommercialHypothesis, ...] = ()
+    india_market_hypotheses: tuple[str, ...] = ()
+    personal_relevance: tuple[ProjectRelevance, ...] = ()
+    risks_and_unknowns: tuple[str, ...] = ()
+    watchlist_changes: tuple[str, ...] = ()
+    source_coverage: tuple[SourceCoverage, ...] = ()
+    agent_health: dict[str, str] = Field(default_factory=dict)
 
 
 class StageState(IntelligenceModel):
@@ -116,4 +167,4 @@ class HumanReviewCase(IntelligenceModel):
 
 class HumanReviewSet(IntelligenceModel):
     version: str
-    cases: tuple[HumanReviewCase, ...] = Field(min_length=10)
+    cases: tuple[HumanReviewCase, ...] = Field(min_length=20)

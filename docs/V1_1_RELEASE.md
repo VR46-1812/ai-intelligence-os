@@ -9,8 +9,10 @@ V1.1 preserves the local arXiv V1 baseline and adds free public metadata from:
 - Hugging Face Hub models, datasets, and Spaces.
 - HTTPS RSS/Atom feeds from an operator allowlist of official organizations.
 
-X, Reddit, YouTube, Medium, Substack, paid APIs, cloud services, authentication,
-Docker, repository cloning, and downloaded-code execution are excluded.
+This document describes the stable V1.1 boundary. Weekend Beta adds bounded
+public feeds and user-supplied exports under the stricter policy documented in
+`docs/WEEKEND_BETA.md`. Paid APIs, cloud services, authentication, Docker,
+repository cloning, and downloaded-code execution remain excluded.
 
 ## Operator flow
 

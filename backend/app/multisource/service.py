@@ -17,8 +17,10 @@ from app.domain.models import (
     PageRequest,
     PipelineStatus,
     PipelineTriggerType,
+    SourceHealth,
     SourceRecord,
     SourceRecordFilter,
+    TrustTier,
 )
 from app.ingestion.contracts import (
     ConnectorException,
@@ -43,6 +45,7 @@ from app.sources.multisource import (
     HuggingFaceConnector,
     OpenReviewConnector,
     RssAtomConnector,
+    XExportConnector,
     stable_artifact_key,
 )
 
@@ -91,35 +94,62 @@ class MultiSourceDiscoveryService:
         )
         counts: list[SourceSyncCount] = []
         try:
-            initial: tuple[SourceConnector, ...] = tuple(
-                connector
-                for connector, enabled in (
-                    (
-                        OpenReviewConnector(
-                            http, self._settings.sources.openreview_venues, clock=self._clock
-                        ),
-                        self._settings.sources.openreview_enabled,
-                    ),
-                    (
-                        HuggingFaceConnector(http, clock=self._clock),
-                        self._settings.sources.huggingface_enabled,
-                    ),
-                    (
-                        RssAtomConnector(http, self._settings.sources.rss_feeds, clock=self._clock),
-                        self._settings.sources.rss_enabled,
-                    ),
+            connectors: list[SourceConnector] = []
+            if self._settings.sources.openreview_enabled:
+                connectors.append(
+                    OpenReviewConnector(
+                        http, self._settings.sources.openreview_venues, clock=self._clock
+                    )
                 )
-                if enabled
+            if self._settings.sources.huggingface_enabled:
+                connectors.append(HuggingFaceConnector(http, clock=self._clock))
+            if self._settings.sources.rss_enabled:
+                connectors.append(
+                    RssAtomConnector(http, self._settings.sources.rss_feeds, clock=self._clock)
+                )
+            feed_definitions = (
+                ("youtube", self._settings.sources.youtube_feeds, TrustTier.C, "video"),
+                (
+                    "reddit",
+                    self._settings.sources.reddit_feeds,
+                    TrustTier.D,
+                    "community_discussion",
+                ),
+                ("medium", self._settings.sources.medium_feeds, TrustTier.C, "article"),
+                ("substack", self._settings.sources.substack_feeds, TrustTier.C, "article"),
+                (
+                    "watchlist",
+                    self._settings.sources.watchlist_feeds,
+                    TrustTier.B,
+                    "watchlist_post",
+                ),
             )
-            for connector in initial:
+            connectors.extend(
+                RssAtomConnector(
+                    http,
+                    feeds,
+                    source_key=source_key,
+                    trust_tier=trust_tier,
+                    artifact_kind=artifact_kind,
+                    clock=self._clock,
+                )
+                for source_key, feeds, trust_tier, artifact_kind in feed_definitions
+                if feeds
+            )
+            for connector in connectors:
                 counts.append(
                     await self._sync_connector(connector, maximum_records, lookback_hours, trigger)
                 )
             if self._settings.sources.github_enrichment_enabled:
-                repositories = self._repository_urls()
+                repositories = tuple(
+                    dict.fromkeys(
+                        (*self._repository_urls(), *self._settings.sources.github_watchlist)
+                    )
+                )
                 github = GitHubConnector(
                     http,
                     repositories[:maximum_records],
+                    search_queries=self._settings.sources.github_search_queries,
                     token=None
                     if self._settings.sources.github_token is None
                     else self._settings.sources.github_token.get_secret_value(),
@@ -135,6 +165,27 @@ class MultiSourceDiscoveryService:
             total_fetched=sum(item.fetched for item in counts),
             total_normalized=sum(item.normalized for item in counts),
             events_updated=sum(item.linked for item in counts),
+        )
+
+    async def import_x_export(self, items: tuple[dict[str, object], ...]) -> SourceSyncCount:
+        """Persist a bounded user-supplied export without network access."""
+        if not 1 <= len(items) <= 5:
+            raise ValueError("X export imports must contain between 1 and 5 records")
+        source = self._repositories.sources.get_by_key("x-watchlist")
+        if source is None:
+            raise ValueError("X export source is not registered")
+        if not source.enabled:
+            with transaction(self._connection):
+                self._repositories.sources.update(
+                    source.model_copy(
+                        update={"enabled": True, "health_status": SourceHealth.UNKNOWN}
+                    )
+                )
+        return await self._sync_connector(
+            XExportConnector(items, clock=self._clock),
+            len(items),
+            168,
+            PipelineTriggerType.MANUAL,
         )
 
     async def _sync_connector(
@@ -341,13 +392,14 @@ class MultiSourceDiscoveryService:
         }
         self._connection.execute(
             """INSERT INTO source_artifacts(
-            id,source_record_id,source_key,upstream_id,artifact_type,title,summary,
+            id,source_record_id,source_key,upstream_id,artifact_type,source_type,title,summary,
             canonical_url,content_class,authority,freshness,novelty,published_at,
             updated_at,metadata_json,created_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(source_key,upstream_id) DO UPDATE SET
             source_record_id=excluded.source_record_id,title=excluded.title,
             summary=excluded.summary,canonical_url=excluded.canonical_url,
+            source_type=excluded.source_type,
             content_class=excluded.content_class,
             authority=excluded.authority,freshness=excluded.freshness,novelty=0,
             updated_at=excluded.updated_at,metadata_json=excluded.metadata_json""",
@@ -357,10 +409,18 @@ class MultiSourceDiscoveryService:
                 normalized.source_key,
                 normalized.upstream_id,
                 artifact_type,
+                self._source_type(normalized, artifact_type),
                 normalized.title,
                 normalized.abstract,
                 normalized.canonical_url,
-                "interpretation" if normalized.source_key == "official-rss" else "fact",
+                (
+                    "community_reaction"
+                    if normalized.source_key in {"reddit", "x-watchlist"}
+                    else "interpretation"
+                    if normalized.source_key
+                    in {"official-rss", "youtube", "medium", "substack", "watchlist"}
+                    else "fact"
+                ),
                 self._authority(normalized),
                 freshness,
                 1.0 if existing is None else 0.0,
@@ -417,15 +477,32 @@ class MultiSourceDiscoveryService:
             if work_id
             else "canonical_work"
         )
+        confidence = 1.0 if basis == "external_id" else 0.95 if basis == "explicit_url" else 1.0
+        matching_evidence = (
+            [
+                f"{item.id_type.value}:{item.normalized_value}"
+                for item in normalized.identities
+                if item.id_type
+                in {ExternalIdType.ARXIV, ExternalIdType.OPENREVIEW, ExternalIdType.DOI}
+            ]
+            if basis == "external_id"
+            else list(normalized.repository_urls)
+            if basis == "explicit_url"
+            else [normalized.canonical_url]
+        )
         self._connection.execute(
-            """INSERT OR IGNORE INTO linked_event_artifacts(
-            event_id,artifact_id,relationship,resolution_basis) VALUES(?,?,?,?)""",
-            (event_id, artifact_id, relationship, basis),
+            """INSERT INTO linked_event_artifacts(
+            event_id,artifact_id,relationship,resolution_basis,confidence,matching_evidence_json)
+            VALUES(?,?,?,?,?,?) ON CONFLICT(event_id,artifact_id) DO UPDATE SET
+            relationship=excluded.relationship,resolution_basis=excluded.resolution_basis,
+            confidence=excluded.confidence,matching_evidence_json=excluded.matching_evidence_json,
+            active=1,corrected_at=NULL,correction_reason=NULL""",
+            (event_id, artifact_id, relationship, basis, confidence, json.dumps(matching_evidence)),
         )
         row = self._connection.execute(
             """SELECT COUNT(DISTINCT a.source_key) count
             FROM linked_event_artifacts l JOIN source_artifacts a ON a.id=l.artifact_id
-            WHERE l.event_id=?""",
+            WHERE l.event_id=? AND l.active=1""",
             (event_id,),
         ).fetchone()
         corroboration = min(1.0, max(0, int(row["count"]) - 1) / 2) if row else 0.0
@@ -455,13 +532,32 @@ class MultiSourceDiscoveryService:
 
     @staticmethod
     def _artifact_type(record: NormalizedRecord) -> str:
-        if record.source_key == "official-rss":
+        if record.source_key in {
+            "official-rss",
+            "youtube",
+            "reddit",
+            "medium",
+            "substack",
+            "watchlist",
+            "x-watchlist",
+        }:
             return "official_post"
         if record.source_key == "github":
             return "release" if record.work_type.value == "release" else "repository"
         if record.source_key == "huggingface":
             return str(record.extra.get("kind", "model")).removesuffix("s")
         return "paper"
+
+    @staticmethod
+    def _source_type(record: NormalizedRecord, artifact_type: str) -> str:
+        return {
+            "youtube": "video",
+            "reddit": "community_discussion",
+            "medium": "article",
+            "substack": "article",
+            "watchlist": "watchlist_post",
+            "x-watchlist": "x_post",
+        }.get(record.source_key, artifact_type)
 
     @staticmethod
     def _relationship(record: NormalizedRecord, work_id: str | None) -> str:
@@ -473,7 +569,9 @@ class MultiSourceDiscoveryService:
             return "official_repository" if work_id else "community_reference"
         if record.source_key == "huggingface":
             return "official_model" if work_id else "community_reference"
-        return "official_announcement" if work_id else "community_reference"
+        if record.source_key == "official-rss":
+            return "official_announcement" if work_id else "community_reference"
+        return "community_reference"
 
     @staticmethod
     def _authority(record: NormalizedRecord) -> float:
@@ -483,6 +581,12 @@ class MultiSourceDiscoveryService:
             return 0.75
         if record.source_key in {"github", "huggingface"}:
             return 0.85
+        if record.source_key == "watchlist":
+            return 0.7
+        if record.source_key in {"youtube", "medium", "substack"}:
+            return 0.55
+        if record.source_key in {"reddit", "x-watchlist"}:
+            return 0.25
         return 0.5
 
     @staticmethod
@@ -504,7 +608,7 @@ class LinkedEventReader:
             clause = """WHERE EXISTS(
             SELECT 1 FROM linked_event_artifacts lx
             JOIN source_artifacts ax ON ax.id=lx.artifact_id
-            WHERE lx.event_id=e.id AND ax.source_key=?)"""
+            WHERE lx.event_id=e.id AND lx.active=1 AND ax.source_key=?)"""
         params: tuple[object, ...] = () if source is None else (source,)
         total = int(
             self._connection.execute(
@@ -532,6 +636,41 @@ class LinkedEventReader:
         ).fetchone()
         return () if row is None else self._sources(str(row["id"]))
 
+    def unlink(
+        self,
+        event_id: str,
+        artifact_id: str,
+        reason: str,
+        *,
+        corrected_at: datetime | None = None,
+    ) -> bool:
+        """Deactivate one mistaken association and deterministically refresh corroboration."""
+        when = corrected_at or datetime.now(UTC)
+        cursor = self._connection.execute(
+            """UPDATE linked_event_artifacts SET active=0,corrected_at=?,correction_reason=?
+            WHERE event_id=? AND artifact_id=? AND active=1""",
+            (self._iso(when), reason, event_id, artifact_id),
+        )
+        if cursor.rowcount != 1:
+            return False
+        row = self._connection.execute(
+            """SELECT COUNT(DISTINCT a.source_key)
+            FROM linked_event_artifacts l JOIN source_artifacts a ON a.id=l.artifact_id
+            WHERE l.event_id=? AND l.active=1""",
+            (event_id,),
+        ).fetchone()
+        sources = 0 if row is None else int(row[0])
+        corroboration = min(1.0, max(0, sources - 1) / 2)
+        self._connection.execute(
+            "UPDATE linked_events SET corroboration=?,updated_at=? WHERE id=?",
+            (corroboration, self._iso(when), event_id),
+        )
+        return True
+
+    @staticmethod
+    def _iso(value: datetime) -> str:
+        return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
     def _event(self, row: sqlite3.Row) -> LinkedEvent:
         return LinkedEvent(
             id=str(row["id"]),
@@ -544,8 +683,9 @@ class LinkedEventReader:
 
     def _sources(self, event_id: str) -> tuple[LinkedSourceEvidence, ...]:
         rows = self._connection.execute(
-            """SELECT a.*,l.relationship FROM linked_event_artifacts l
-            JOIN source_artifacts a ON a.id=l.artifact_id WHERE l.event_id=?
+            """SELECT a.*,l.relationship,l.confidence,l.matching_evidence_json
+            FROM linked_event_artifacts l
+            JOIN source_artifacts a ON a.id=l.artifact_id WHERE l.event_id=? AND l.active=1
             ORDER BY a.authority DESC,a.source_key,a.id""",
             (event_id,),
         ).fetchall()
@@ -554,9 +694,12 @@ class LinkedEventReader:
                 artifact_id=str(row["id"]),
                 source_key=str(row["source_key"]),
                 artifact_type=str(row["artifact_type"]),
+                source_type=str(row["source_type"]),
                 title=str(row["title"]),
                 canonical_url=str(row["canonical_url"]),
                 relationship=str(row["relationship"]),
+                confidence=float(row["confidence"]),
+                matching_evidence=tuple(json.loads(str(row["matching_evidence_json"]))),
                 content_class=str(row["content_class"]),
                 authority=float(row["authority"]),
                 freshness=float(row["freshness"]),

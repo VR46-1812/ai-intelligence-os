@@ -36,6 +36,10 @@ const INITIAL_QUERY: CatalogQuery = {
   q: "",
   topic: "",
   source: "",
+  sourceType: "",
+  minimumAuthority: "",
+  minimumCorroboration: "",
+  linkedOnly: false,
   publishedFrom: "",
   publishedTo: "",
   sort: "newest",
@@ -157,7 +161,7 @@ function PaperDetail({ apiBaseUrl, paper, state, onClose, evidence, evidenceStat
             <p className="eyebrow" id="linked-sources-heading">Linked-source evidence</p>
             {paper.linked_sources.length ? <div className="linked-source-list">{paper.linked_sources.map((source) => {
               const url = safeExternalUrl(source.canonical_url);
-              return <article key={source.artifact_id}><div><strong>{source.source_key}</strong><span>{source.relationship.replaceAll("_", " ")}</span><span>{source.content_class.replaceAll("_", " ")}</span></div><p>{source.title}</p>{url && <a href={url} target="_blank" rel="noreferrer noopener">Open verified source ↗</a>}</article>;
+              return <article key={source.artifact_id}><div><strong>{source.source_key}</strong><span>{source.source_type ?? source.artifact_type} · {source.relationship.replaceAll("_", " ")}</span><span>{source.content_class.replaceAll("_", " ")} · {Math.round(source.authority * 100)}% authority · {Math.round((source.confidence ?? 1) * 100)}% link confidence</span></div><p>{source.title}</p>{url && <a href={url} target="_blank" rel="noreferrer noopener">Open verified source ↗</a>}</article>;
             })}</div> : <p className="muted-copy">No corroborating source has been linked yet.</p>}
           </section>
           <section className="ranking-panel" aria-labelledby="detail-ranking-heading">
@@ -301,7 +305,7 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
     setQuery((current) => ({ ...current, q: draftQuery.trim(), offset: 0 }));
   }
 
-  function updateFilter(field: keyof Pick<CatalogQuery, "topic" | "source" | "publishedFrom" | "publishedTo" | "sort">, value: string) {
+  function updateFilter(field: keyof Pick<CatalogQuery, "topic" | "source" | "sourceType" | "minimumAuthority" | "minimumCorroboration" | "publishedFrom" | "publishedTo" | "sort">, value: string) {
     setLoadState("loading");
     setQuery((current) => ({ ...current, [field]: value, offset: 0 }));
   }
@@ -402,6 +406,15 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
               {filters.sources.map((source) => <option value={source.key} key={source.key}>{source.name}</option>)}
             </select>
           </label>
+          <label>
+            <span>Source type</span>
+            <select value={query.sourceType} onChange={(event) => updateFilter("sourceType", event.target.value)}>
+              <option value="">All types</option><option value="paper">Paper</option><option value="repository">Repository</option><option value="release">Release</option><option value="model">Model</option><option value="dataset">Dataset</option><option value="space">Space</option><option value="official_post">Official post</option><option value="video">Video</option><option value="community_discussion">Community discussion</option><option value="article">Article</option>
+            </select>
+          </label>
+          <label><span>Minimum authority</span><select value={query.minimumAuthority} onChange={(event) => updateFilter("minimumAuthority", event.target.value)}><option value="">Any authority</option><option value="0.75">High · 75%+</option><option value="0.5">Medium · 50%+</option></select></label>
+          <label><span>Minimum corroboration</span><select value={query.minimumCorroboration} onChange={(event) => updateFilter("minimumCorroboration", event.target.value)}><option value="">Any corroboration</option><option value="0.5">Two sources</option><option value="1">Three+ sources</option></select></label>
+          <label className="checkbox-filter"><input type="checkbox" checked={query.linkedOnly} onChange={(event) => setQuery((current) => ({ ...current, linkedOnly: event.target.checked, offset: 0 }))} /><span>Linked events only</span></label>
           <label>
             <span>From</span>
             <input type="date" value={query.publishedFrom} onChange={(event) => updateFilter("publishedFrom", event.target.value)} />

@@ -22,6 +22,7 @@ from app.sources.multisource import (
     HuggingFaceConnector,
     OpenReviewConnector,
     RssAtomConnector,
+    XExportConnector,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "multisource"
@@ -151,6 +152,48 @@ def test_github_enrichment_is_objective_canonical_and_never_executes_code() -> N
     assert release.work_type.value == "release"
     assert release.extra["tag"] == "v1.2.0"
     assert release.repository_urls == ("https://github.com/example/agent-memory",)
+
+
+def test_github_configured_search_discovers_repositories_without_paper_links() -> None:
+    repository = json.loads((FIXTURES / "github.json").read_text(encoding="utf-8"))
+    http = FixtureHttp(
+        {
+            "search/repositories": (
+                "application/json",
+                json.dumps({"items": [repository]}).encode(),
+            )
+        }
+    )
+    connector = GitHubConnector(
+        http,
+        (),
+        search_queries=("topic:llm stars:>100",),
+        clock=lambda: NOW,
+    )
+    normalized = connector.normalize(asyncio.run(_one(connector)))
+    assert normalized.title == "example/agent-memory"
+    assert http.requests[0][2] == 1000
+
+
+def test_user_supplied_x_export_is_bounded_and_classified_as_tier_d() -> None:
+    connector = XExportConnector(
+        (
+            {
+                "id": "x-1",
+                "text": (
+                    "Discussion of arXiv:2607.00001 with https://github.com/example/agent-memory"
+                ),
+                "url": "https://x.com/example/status/1",
+                "created_at": "2026-07-22T00:00:00Z",
+                "author": "example",
+            },
+        ),
+        clock=lambda: NOW,
+    )
+    normalized = connector.normalize(asyncio.run(_one(connector)))
+    assert connector.trust_tier is TrustTier.D
+    assert normalized.extra["origin"] == "user_supplied_export"
+    assert normalized.repository_urls == ("https://github.com/example/agent-memory",)
 
 
 def test_huggingface_discovers_model_dataset_and_space_contract_with_arxiv_link() -> None:
@@ -338,6 +381,22 @@ def test_paper_repository_model_and_announcement_become_one_linked_event() -> No
             "official-rss",
         }
         assert page.items[0].corroboration == 1.0
+        repository_artifact = next(
+            source.artifact_id for source in page.items[0].sources if source.source_key == "github"
+        )
+        with transaction(connection):
+            assert LinkedEventReader(connection).unlink(
+                page.items[0].id,
+                repository_artifact,
+                "Operator confirmed that this repository belongs to another project.",
+                corrected_at=NOW,
+            )
+        corrected = LinkedEventReader(connection).list().items[0]
+        assert {source.source_key for source in corrected.sources} == {
+            "huggingface",
+            "official-rss",
+        }
+        assert corrected.corroboration == 0.5
     finally:
         connection.close()
         shutil.rmtree(settings.paths.data_root, ignore_errors=True)

@@ -32,6 +32,7 @@ _ARXIV = re.compile(
     r"(?:arxiv:|arxiv\.org/(?:abs|pdf)/)([a-z.-]+/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?", re.I
 )
 _GITHUB = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.I)
+_TRANSCRIPT = re.compile(r"https://[^\s\"'<>]+\.(?:vtt|srt)(?:\?[^\s\"'<>]*)?", re.I)
 
 
 class SourceHttpClient(Protocol):
@@ -312,6 +313,7 @@ class GitHubConnector:
         http: SourceHttpClient,
         repository_urls: tuple[str, ...],
         *,
+        search_queries: tuple[str, ...] = (),
         token: str | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
@@ -320,6 +322,9 @@ class GitHubConnector:
             dict.fromkeys(self.canonical_repository(url) for url in repository_urls)
         )
         self._token = token
+        self.search_queries = tuple(
+            dict.fromkeys(query.strip() for query in search_queries if query.strip())
+        )
         self._clock = clock
 
     @staticmethod
@@ -337,6 +342,51 @@ class GitHubConnector:
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         records: list[RawSourceRecord] = []
+        for search_query in self.search_queries:
+            if len(records) >= window.page_size:
+                break
+            query = urlencode(
+                {
+                    "q": search_query,
+                    "sort": "updated",
+                    "order": "desc",
+                    "per_page": window.page_size - len(records),
+                }
+            )
+            response = await self._http.get(
+                f"https://api.github.com/search/repositories?{query}",
+                source_key=self.key,
+                minimum_request_interval_ms=1000,
+                expected_media_types=("application/json",),
+                headers=headers,
+            )
+            search = _json_object(response.content)
+            for value in _object_list(search.get("items", [])):
+                if len(records) >= window.page_size or not isinstance(value, dict):
+                    break
+                data = cast(dict[str, object], value)
+                full_name = _clean(data.get("full_name"))
+                if full_name is None:
+                    continue
+                records.append(
+                    RawSourceRecord(
+                        source_key=self.key,
+                        upstream_id=full_name.casefold(),
+                        upstream_version=_clean(data.get("pushed_at")),
+                        canonical_url=f"https://github.com/{full_name}",
+                        observed_at=self._clock(),
+                        published_at=_datetime(data.get("created_at")),
+                        updated_at=_datetime(data.get("updated_at")),
+                        media_type="application/json",
+                        payload=json.dumps(
+                            data, ensure_ascii=False, separators=(",", ":")
+                        ).encode(),
+                        response_metadata={
+                            **response.response_metadata,
+                            "discovery": "configured_search",
+                        },
+                    )
+                )
         for repository in self.repositories:
             if len(records) >= window.page_size:
                 break
@@ -672,17 +722,25 @@ class RssAtomConnector:
         http: SourceHttpClient,
         feeds: tuple[str, ...],
         *,
+        source_key: str = "official-rss",
+        trust_tier: TrustTier = TrustTier.A,
+        artifact_kind: str = "official_post",
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         if not feeds or any(not feed.startswith("https://") for feed in feeds):
             raise ValueError("official RSS feeds must be an HTTPS allowlist")
         self._http = http
         self.feeds = feeds
+        self.key = source_key
+        self.trust_tier = trust_tier
+        self.artifact_kind = artifact_kind
         self._clock = clock
 
     async def fetch(self, window: FetchWindow) -> AsyncIterator[ConnectorPage]:
         records: list[RawSourceRecord] = []
         for feed in self.feeds:
+            if len(records) >= window.page_size:
+                break
             response = await self._http.get(
                 feed,
                 source_key=self.key,
@@ -757,6 +815,7 @@ class RssAtomConnector:
                     for m in _GITHUB.finditer(text)
                 )
             )
+            transcript_urls = tuple(dict.fromkeys(_TRANSCRIPT.findall(text)))
             identities = [
                 NormalizedIdentity(
                     id_type=ExternalIdType.URL,
@@ -785,10 +844,14 @@ class RssAtomConnector:
                 identities=tuple(identities),
                 authors=(),
                 source_topics=(),
-                document_urls=(),
+                document_urls=transcript_urls if self.key == "youtube" else (),
                 repository_urls=repositories,
                 license_hint=None,
-                extra={"arxiv_ids": list(arxiv_ids)},
+                extra={
+                    "arxiv_ids": list(arxiv_ids),
+                    "kind": self.artifact_kind,
+                    "transcript_policy": "publisher_linked_only" if self.key == "youtube" else None,
+                },
             )
         except (ET.ParseError, ValueError) as error:
             raise _failure("official RSS", str(error)) from error
@@ -822,3 +885,110 @@ class RssAtomConnector:
 def stable_artifact_key(source_key: str, upstream_id: str) -> str:
     """Return a deterministic non-secret artifact key for idempotent persistence."""
     return hashlib.sha256(f"{source_key}\0{upstream_id}".encode()).hexdigest()
+
+
+class XExportConnector:
+    """Ingest only user-supplied X export records; never scrape or bypass platform access."""
+
+    contract_version: str = "1.0"
+    key = "x-watchlist"
+    trust_tier = TrustTier.D
+    connector_version = "x-export-v1"
+
+    def __init__(
+        self,
+        items: tuple[dict[str, object], ...],
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
+        self._items = items
+        self._clock = clock
+
+    async def fetch(self, window: FetchWindow) -> AsyncIterator[ConnectorPage]:
+        records: list[RawSourceRecord] = []
+        for item in self._items[: window.page_size]:
+            upstream_id = _clean(item.get("id"))
+            url = _clean(item.get("url"))
+            text = _clean(item.get("text"))
+            if upstream_id is None or url is None or text is None:
+                continue
+            parsed = urlparse(url)
+            if parsed.scheme != "https" or parsed.hostname not in {"x.com", "twitter.com"}:
+                continue
+            payload = json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode()
+            created = _datetime(item.get("created_at"))
+            records.append(
+                RawSourceRecord(
+                    source_key=self.key,
+                    upstream_id=upstream_id,
+                    upstream_version=None,
+                    canonical_url=url,
+                    observed_at=self._clock(),
+                    published_at=created,
+                    updated_at=created,
+                    media_type="application/json",
+                    payload=payload,
+                    response_metadata={"origin": "user_supplied_export"},
+                )
+            )
+        yield ConnectorPage(
+            records=tuple(records),
+            next_cursor=_checkpoint(
+                len(records), window, records[-1].upstream_id if records else None
+            ),
+            exhausted=True,
+        )
+
+    def normalize(self, record: RawSourceRecord) -> NormalizedRecord:
+        try:
+            item = _json_object(record.payload)
+            text = str(item["text"])
+            arxiv_ids = tuple(
+                dict.fromkeys(match.group(1).casefold() for match in _ARXIV.finditer(text))
+            )
+            repositories = tuple(
+                dict.fromkeys(
+                    f"https://github.com/{match.group(1)}/{match.group(2).removesuffix('.git')}"
+                    for match in _GITHUB.finditer(text)
+                )
+            )
+            identities = [
+                NormalizedIdentity(
+                    id_type=ExternalIdType.URL,
+                    raw_value=record.canonical_url,
+                    normalized_value=record.canonical_url,
+                )
+            ]
+            identities.extend(
+                NormalizedIdentity(
+                    id_type=ExternalIdType.ARXIV, raw_value=value, normalized_value=value
+                )
+                for value in arxiv_ids
+            )
+            return NormalizedRecord(
+                source_key=self.key,
+                upstream_id=record.upstream_id,
+                work_type=WorkType.ARTICLE,
+                title=text[:160],
+                normalized_title=normalize_title(text[:160]),
+                abstract=text,
+                canonical_url=record.canonical_url,
+                publication_status=PublicationStatus.PUBLISHED,
+                published_at=record.published_at,
+                updated_at=record.updated_at,
+                identities=tuple(identities),
+                authors=(),
+                source_topics=(),
+                document_urls=(),
+                repository_urls=repositories,
+                extra={"origin": "user_supplied_export", "author": _clean(item.get("author"))},
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            raise _failure("X export", "invalid user-supplied record") from error
+
+    def validate(self, record: NormalizedRecord) -> list[str]:
+        return (
+            []
+            if urlparse(record.canonical_url).hostname in {"x.com", "twitter.com"}
+            else ["invalid X export URL"]
+        )

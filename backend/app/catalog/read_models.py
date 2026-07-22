@@ -33,13 +33,17 @@ class CatalogPaperQuery(CatalogModel):
     q: str | None = Field(default=None, max_length=200)
     topic: str | None = Field(default=None, min_length=1, max_length=255)
     source: str | None = Field(default=None, min_length=1, max_length=255)
+    source_type: str | None = Field(default=None, min_length=1, max_length=50)
+    minimum_authority: float | None = Field(default=None, ge=0, le=1)
+    minimum_corroboration: float | None = Field(default=None, ge=0, le=1)
+    linked_only: bool = False
     published_from: date | None = None
     published_to: date | None = None
     sort: CatalogSort = CatalogSort.NEWEST
     limit: int = Field(default=10, ge=1, le=50)
     offset: int = Field(default=0, ge=0, le=100_000)
 
-    @field_validator("q", "topic", "source")
+    @field_validator("q", "topic", "source", "source_type")
     @classmethod
     def strip_optional_text(cls, value: str | None) -> str | None:
         if value is None:

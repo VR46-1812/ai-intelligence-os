@@ -173,11 +173,38 @@ class SQLiteCatalogReadRepository:
         if query.source is not None:
             clauses.append(
                 "AND (s.source_key = ? OR EXISTS (SELECT 1 FROM linked_events le "
-                "JOIN linked_event_artifacts lea ON lea.event_id=le.id "
+                "JOIN linked_event_artifacts lea ON lea.event_id=le.id AND lea.active=1 "
                 "JOIN source_artifacts sa ON sa.id=lea.artifact_id "
                 "WHERE le.primary_work_id=w.id AND sa.source_key=?))"
             )
             parameters.extend((query.source, query.source))
+        if query.source_type is not None:
+            clauses.append(
+                "AND EXISTS (SELECT 1 FROM linked_events le "
+                "JOIN linked_event_artifacts lea ON lea.event_id=le.id AND lea.active=1 "
+                "JOIN source_artifacts sa ON sa.id=lea.artifact_id "
+                "WHERE le.primary_work_id=w.id AND sa.source_type=?)"
+            )
+            parameters.append(query.source_type)
+        if query.minimum_authority is not None:
+            clauses.append(
+                "AND EXISTS (SELECT 1 FROM linked_events le "
+                "JOIN linked_event_artifacts lea ON lea.event_id=le.id AND lea.active=1 "
+                "JOIN source_artifacts sa ON sa.id=lea.artifact_id "
+                "WHERE le.primary_work_id=w.id AND sa.authority>=?)"
+            )
+            parameters.append(query.minimum_authority)
+        if query.minimum_corroboration is not None:
+            clauses.append(
+                "AND EXISTS (SELECT 1 FROM linked_events le WHERE le.primary_work_id=w.id "
+                "AND le.corroboration>=?)"
+            )
+            parameters.append(query.minimum_corroboration)
+        if query.linked_only:
+            clauses.append(
+                "AND EXISTS (SELECT 1 FROM linked_events le JOIN linked_event_artifacts lea "
+                "ON lea.event_id=le.id AND lea.active=1 WHERE le.primary_work_id=w.id)"
+            )
         if query.published_from is not None:
             clauses.append("AND COALESCE(v.published_at, w.first_published_at) >= ?")
             parameters.append(SQLiteCatalogReadRepository._start_of_day(query.published_from))
@@ -208,6 +235,10 @@ class SQLiteCatalogReadRepository:
             reasons.append("topic filter")
         if query.source:
             reasons.append("source filter")
+        if query.source_type or query.minimum_authority is not None:
+            reasons.append("linked evidence filter")
+        if query.minimum_corroboration is not None or query.linked_only:
+            reasons.append("linked event filter")
         if query.published_from or query.published_to:
             reasons.append("publication date filter")
         return None if not reasons else ", ".join(reasons)
@@ -283,6 +314,7 @@ class SQLiteCatalogReadRepository:
                     artifact_id=str(row["id"]),
                     source_key=str(row["source_key"]),
                     artifact_type=str(row["artifact_type"]),
+                    source_type=str(row["source_type"]),
                     title=str(row["title"]),
                     canonical_url=str(row["canonical_url"]),
                     relationship=str(row["relationship"]),

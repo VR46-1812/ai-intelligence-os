@@ -79,7 +79,7 @@ def test_new_database_migrates_with_required_sqlite_features(database_path: Path
 
     applied = MigrationRunner(database).migrate()
 
-    assert [record.version for record in applied] == [1, 2, 3, 4, 5, 6]
+    assert [record.version for record in applied] == [1, 2, 3, 4, 5, 6, 7, 8]
     connection = database.connect()
     try:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -127,11 +127,11 @@ def test_repeated_migration_is_idempotent(database_path: Path) -> None:
     first = runner.migrate()
     second = runner.migrate()
 
-    assert len(first) == 6
+    assert len(first) == 8
     assert second == ()
     connection = database.connect()
     try:
-        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 6
+        assert connection.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 8
     finally:
         connection.close()
 
@@ -247,7 +247,7 @@ def test_previous_schema_fixture_migrates_without_data_loss(database_path: Path)
     database = _database(database_path)
     applied = MigrationRunner(database).migrate()
 
-    assert [record.version for record in applied] == [1, 2, 3, 4, 5, 6]
+    assert [record.version for record in applied] == [1, 2, 3, 4, 5, 6, 7, 8]
     connection = database.connect()
     try:
         marker = connection.execute("SELECT marker FROM previous_release_marker").fetchone()[0]
@@ -311,7 +311,7 @@ def test_backup_restore_round_trip_preserves_temporary_data(database_path: Path)
             connection.execute("SELECT id FROM sources WHERE id='round-trip-source'").fetchone()[0]
             == "round-trip-source"
         )
-        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 6
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 8
     finally:
         connection.close()
 

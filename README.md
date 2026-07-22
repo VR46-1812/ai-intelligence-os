@@ -40,3 +40,7 @@ V1.1 adds registry-driven OpenReview, GitHub enrichment, Hugging Face Hub, and
 allowlisted official RSS/Atom discovery. The same `run-daily.ps1` command runs
 the bounded multi-source pipeline. See `docs/V1_1_RELEASE.md` for source trust,
 checkpoints, linked-event behavior, and operator troubleshooting.
+
+Weekend Beta adds the observable fourteen-stage sequential agent graph and
+bounded public-feed/watchlist discovery. See `docs/WEEKEND_BETA.md` for legal
+source boundaries, degraded-source behavior, resume semantics and acceptance.

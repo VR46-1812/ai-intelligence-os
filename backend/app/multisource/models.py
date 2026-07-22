@@ -32,9 +32,12 @@ class LinkedSourceEvidence(MultiSourceModel):
     artifact_id: str
     source_key: str
     artifact_type: str
+    source_type: str
     title: str
     canonical_url: str
     relationship: str
+    confidence: float = Field(default=1, ge=0, le=1)
+    matching_evidence: tuple[str, ...] = ()
     content_class: str
     authority: float = Field(ge=0, le=1)
     freshness: float = Field(ge=0, le=1)
