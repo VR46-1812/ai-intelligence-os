@@ -11,7 +11,7 @@ from typing import Protocol, cast
 
 import httpx
 
-from app.agents.models import AgentInput, AgentOutput
+from app.agents.models import AgentExecutionMode, AgentInput, AgentOutput
 from app.agents.runtime import AgentRuntime, AgentStageError
 from app.analysis.ollama import OllamaClient
 from app.analysis.service import ScoutAnalysisService
@@ -218,6 +218,8 @@ class ProductionDailyRunner:
         async def orchestrator(_: AgentInput) -> AgentOutput:
             return AgentOutput(
                 summary="Bounded local run accepted.",
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                output_record_count=1,
                 values={
                     "generation_concurrency": 1,
                     "source_concurrency": self._settings.resources.source_download_concurrency,
@@ -257,6 +259,9 @@ class ProductionDailyRunner:
             }
             return AgentOutput(
                 summary="Bounded source discovery completed with isolated failures.",
+                execution_mode=AgentExecutionMode.EXECUTED,
+                input_record_count=len(source_counts),
+                output_record_count=sum(source_counts.values()),
                 values=cast(JsonObject, {"source_counts": source_counts}),
                 provenance_refs=tuple(f"source:{key}" for key in source_counts),
                 metrics={"records_fetched": sum(source_counts.values())},
@@ -268,7 +273,13 @@ class ProductionDailyRunner:
             normalized = sync_result.records_normalized + multi_source.total_normalized
             return AgentOutput(
                 summary="Normalized records passed typed validation and trust classification.",
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=(
+                    sync_result.ingestion.records_seen + multi_source.total_fetched
+                ),
+                output_record_count=normalized,
                 values={"normalized": normalized},
+                provenance_refs=tuple(f"source:{item.source_key}" for item in multi_source.sources),
                 metrics={"records_normalized": normalized},
             )
 
@@ -277,8 +288,13 @@ class ProductionDailyRunner:
             count = 0 if row is None else int(row[0])
             return AgentOutput(
                 summary="Exact-identity and explicit-link associations were resolved.",
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=int(
+                    connection.execute("SELECT COUNT(*) FROM source_artifacts").fetchone()[0]
+                ),
+                output_record_count=count,
                 values={"linked_events": count},
-                evidence_refs=tuple(
+                provenance_refs=tuple(
                     str(row[0])
                     for row in connection.execute(
                         "SELECT id FROM linked_events ORDER BY updated_at DESC LIMIT 20"
@@ -294,6 +310,9 @@ class ProductionDailyRunner:
             ).rank_catalog(limit=100)
             return AgentOutput(
                 summary="Deterministic ranking remained authoritative.",
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=ranking.works_ranked,
+                output_record_count=ranking.works_ranked,
                 values={"works_ranked": ranking.works_ranked},
                 metrics={"works_ranked": ranking.works_ranked},
             )
@@ -347,8 +366,19 @@ class ProductionDailyRunner:
                     id_factory=self._id_factory,
                 ).process(limit=self._settings.scheduler.document_limit)
             spans = sum(item.evidence_spans for item in documents.results)
+            processed = documents.succeeded + documents.failed + documents.quarantined
             return AgentOutput(
-                summary="Bounded primary documents and page evidence were processed.",
+                summary=(
+                    "Bounded primary documents and page evidence were processed."
+                    if processed
+                    else "No pending documents required processing; stored evidence was reused."
+                ),
+                execution_mode=(
+                    AgentExecutionMode.EXECUTED if processed else AgentExecutionMode.REUSED
+                ),
+                input_record_count=len(documents.results),
+                output_record_count=spans,
+                reused_from_run_id=self._current_run_id if not processed else None,
                 values={
                     "processed": documents.succeeded,
                     "failed": documents.failed + documents.quarantined,
@@ -406,6 +436,23 @@ class ProductionDailyRunner:
                 counts = await self.run_analyses(analysis, counts)
             return AgentOutput(
                 summary="Scout briefs and deep dives were generated or safely reused.",
+                execution_mode=(
+                    AgentExecutionMode.EXECUTED
+                    if counts.briefs_generated + counts.deep_dives_generated
+                    else AgentExecutionMode.CACHED
+                ),
+                input_record_count=counts.works_ranked,
+                output_record_count=(
+                    counts.briefs_generated
+                    + counts.briefs_cached
+                    + counts.deep_dives_generated
+                    + counts.deep_dives_cached
+                ),
+                reused_from_run_id=(
+                    self._current_run_id
+                    if not counts.briefs_generated and not counts.deep_dives_generated
+                    else None
+                ),
                 values=counts.model_dump(),
                 evidence_refs=tuple(
                     str(row[0])
@@ -433,24 +480,62 @@ class ProductionDailyRunner:
                 raise AgentStageError(
                     "skeptic_verifier", "Unsupported factual claims blocked publication."
                 )
+            evidence_refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT DISTINCT evidence_span_id FROM claim_evidence ORDER BY evidence_span_id"
+                )
+            )
+            analysis_refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT id FROM analysis_runs WHERE status='succeeded'
+                    ORDER BY completed_at DESC LIMIT 20"""
+                )
+            )
             return AgentOutput(
-                summary="All published factual claims retain evidence links.",
+                summary=(
+                    f"Verified {len(evidence_refs)} cited evidence references; no unsupported "
+                    "published factual claim remained."
+                ),
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=len(analysis_refs),
+                output_record_count=len(evidence_refs),
                 values={"unsupported_claims": 0},
+                evidence_refs=evidence_refs,
+                provenance_refs=analysis_refs,
                 metrics={"unsupported_claims": 0},
             )
 
         async def learning(_: AgentInput) -> AgentOutput:
             rows = connection.execute(
-                """SELECT output_json FROM analysis_runs
+                """SELECT id,output_json FROM analysis_runs
                 WHERE analysis_type='deep_dive' AND status='succeeded'
                 ORDER BY completed_at DESC LIMIT 2"""
             ).fetchall()
+            evidence_refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT DISTINCT ce.evidence_span_id FROM claim_evidence ce
+                    JOIN claims c ON c.id=ce.claim_id JOIN analysis_sections s
+                    ON s.id=c.analysis_section_id JOIN analysis_runs a ON a.id=s.analysis_run_id
+                    WHERE a.analysis_type='deep_dive' AND a.status='succeeded'
+                    ORDER BY ce.evidence_span_id LIMIT 100"""
+                )
+            )
             return AgentOutput(
-                summary="Prerequisite-aware learning focus was derived from verified reports.",
+                summary=(
+                    f"Derived {len(rows)} prerequisite-aware learning plans from cited deep dives."
+                ),
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=len(rows),
+                output_record_count=len(rows),
                 values={
                     "deep_dives_considered": len(rows),
                     "estimated_minutes": min(90, 30 * len(rows)),
                 },
+                evidence_refs=evidence_refs,
+                provenance_refs=tuple(str(row["id"]) for row in rows),
                 metrics={"plans": len(rows)},
             )
 
@@ -459,34 +544,105 @@ class ProductionDailyRunner:
                 "SELECT COUNT(*) FROM claims WHERE claim_type='hypothesis'"
             ).fetchone()
             total = 0 if row is None else int(row[0])
+            evidence_refs = tuple(
+                str(item[0])
+                for item in connection.execute(
+                    """SELECT DISTINCT ce.evidence_span_id FROM claims c
+                    JOIN claim_evidence ce ON ce.claim_id=c.id
+                    WHERE c.claim_type='hypothesis' ORDER BY ce.evidence_span_id LIMIT 100"""
+                )
+            )
             return AgentOutput(
-                summary="Commercial outputs remain explicitly labelled hypotheses.",
+                summary=(
+                    f"Derived {total} explicitly labelled commercial hypotheses "
+                    "from cited analysis."
+                    if total
+                    else "No cited commercial hypothesis was available; no new output was produced."
+                ),
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=total,
+                output_record_count=total,
                 values={"hypotheses": total},
+                evidence_refs=evidence_refs,
+                provenance_refs=tuple(
+                    str(item[0])
+                    for item in connection.execute(
+                        """SELECT id FROM analysis_runs WHERE status='succeeded'
+                        ORDER BY completed_at DESC LIMIT 20"""
+                    )
+                ),
                 metrics={"hypotheses": total},
             )
 
         async def india(_: AgentInput) -> AgentOutput:
+            refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT DISTINCT ce.evidence_span_id FROM claims c
+                    JOIN claim_evidence ce ON ce.claim_id=c.id
+                    WHERE c.claim_type='hypothesis' ORDER BY ce.evidence_span_id LIMIT 100"""
+                )
+            )
             return AgentOutput(
-                summary="India-market buyer and pricing hypotheses were bounded for validation.",
+                summary=(
+                    "Derived India-market buyer and pricing framing from cited hypotheses."
+                    if refs
+                    else "No cited hypothesis was available for India-market framing."
+                ),
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=len(refs),
+                output_record_count=int(bool(refs)),
                 values={"market": "India", "currency": "INR", "status": "hypothesis"},
-                metrics={"markets": 1},
+                evidence_refs=refs,
+                metrics={"markets": int(bool(refs))},
             )
 
         async def personal(_: AgentInput) -> AgentOutput:
             projects = ("RentAssure", "SageAlpha", "BidReady", "US-school chatbot")
+            refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT DISTINCT evidence_span_id FROM claim_evidence
+                    ORDER BY evidence_span_id LIMIT 100"""
+                )
+            )
             return AgentOutput(
                 summary=(
                     "Verified developments were mapped to configured projects "
                     "without changing facts."
+                    if refs
+                    else "No cited development was available for project relevance mapping."
                 ),
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=len(refs),
+                output_record_count=len(projects) if refs else 0,
                 values={"projects": list(projects)},
-                metrics={"projects": len(projects)},
+                evidence_refs=refs,
+                metrics={"projects": len(projects) if refs else 0},
             )
 
         async def editor(_: AgentInput) -> AgentOutput:
+            analysis_refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    """SELECT id FROM analysis_runs WHERE status='succeeded'
+                    ORDER BY completed_at DESC LIMIT 20"""
+                )
+            )
+            evidence_refs = tuple(
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT DISTINCT evidence_span_id FROM claim_evidence LIMIT 100"
+                )
+            )
             return AgentOutput(
-                summary="Daily report inputs passed non-duplication and evidence gates.",
+                summary="Derived the daily report plan from ranked, cited upstream analysis.",
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=len(analysis_refs),
+                output_record_count=1,
                 values={"report_date": self._clock().date().isoformat()},
+                evidence_refs=evidence_refs,
+                provenance_refs=analysis_refs,
                 metrics={"reports_planned": 1},
             )
 
@@ -505,6 +661,9 @@ class ProductionDailyRunner:
             ]
             return AgentOutput(
                 summary="Operational health and retention completed.",
+                execution_mode=AgentExecutionMode.DETERMINISTIC,
+                input_record_count=len(degraded),
+                output_record_count=cleanup.files_deleted,
                 values=cast(
                     JsonObject,
                     {"degraded_sources": degraded, "files_cleaned": cleanup.files_deleted},

@@ -323,13 +323,13 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
     setEvidence(null);
     setEvidenceState("loading");
     setSelectedId(paperId);
-    window.history.replaceState(null, "", `#explore/${encodeURIComponent(paperId)}`);
+    window.history.replaceState(null, "", `#discover/${encodeURIComponent(paperId)}`);
   }
 
   function closeDetail() {
     setSelectedId(null);
     setDetail(null);
-    window.history.replaceState(null, "", "#explore");
+    window.history.replaceState(null, "", "#discover");
   }
 
   async function syncResearch() {
@@ -353,8 +353,8 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
     <main className="explore-main">
       <section className="explore-intro" aria-labelledby="explore-heading">
         <div>
-          <p className="eyebrow cyan">Knowledge base / Stored research</p>
-          <h2 id="explore-heading">Explore papers worth understanding.</h2>
+          <p className="eyebrow cyan">Discover / Stored research</p>
+          <h2 id="explore-heading">Discover research worth understanding.</h2>
           <p>Search canonical metadata and inspect what is stored locally—without loading a model.</p>
         </div>
         <button
@@ -413,8 +413,8 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
             </select>
           </label>
           <label><span>Minimum authority</span><select value={query.minimumAuthority} onChange={(event) => updateFilter("minimumAuthority", event.target.value)}><option value="">Any authority</option><option value="0.75">High · 75%+</option><option value="0.5">Medium · 50%+</option></select></label>
-          <label><span>Minimum corroboration</span><select value={query.minimumCorroboration} onChange={(event) => updateFilter("minimumCorroboration", event.target.value)}><option value="">Any corroboration</option><option value="0.5">Two sources</option><option value="1">Three+ sources</option></select></label>
-          <label className="checkbox-filter"><input type="checkbox" checked={query.linkedOnly} onChange={(event) => setQuery((current) => ({ ...current, linkedOnly: event.target.checked, offset: 0 }))} /><span>Linked events only</span></label>
+          <label><span>Linked evidence</span><select value={query.minimumCorroboration} onChange={(event) => updateFilter("minimumCorroboration", event.target.value)}><option value="">Any source count</option><option value="0.5">2+ associated sources</option><option value="1">3+ sources</option></select></label>
+          <label className="checkbox-filter"><input type="checkbox" checked={query.linkedOnly} onChange={(event) => setQuery((current) => ({ ...current, linkedOnly: event.target.checked, offset: 0 }))} /><span>Associated events only</span></label>
           <label>
             <span>From</span>
             <input type="date" value={query.publishedFrom} onChange={(event) => updateFilter("publishedFrom", event.target.value)} />

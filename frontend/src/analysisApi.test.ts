@@ -80,6 +80,10 @@ describe("local analysis API", () => {
       pipeline: { discovered: 5, normalized: 0, filtered: 5, shortlisted: 5, briefed: 1, analyzed: 2, failed: 0, run_id: "daily" },
       top_technical: [], top_commercial: [], deep_dives: ["deep-1", "deep-2"],
       important_updates: [], learning_focus: ["citations"], coverage_gaps: [],
+      executive_briefing: "One. Two. Three.", what_happened: [], why_it_matters: [],
+      evidence_versus_interpretation: [], research_and_product_launches: [], community_signals: [],
+      learning_plan: [], what_to_build: [], commercial_hypotheses: [], risks_and_unknowns: [],
+      watchlist_changes: [], source_coverage: [],
     }));
     await expect(fetchCompleteDailyReport(fetcher, "/api", new AbortController().signal))
       .resolves.toMatchObject({ deep_dives: ["deep-1", "deep-2"] });

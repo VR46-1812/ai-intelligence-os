@@ -672,13 +672,52 @@ class LinkedEventReader:
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
     def _event(self, row: sqlite3.Row) -> LinkedEvent:
+        sources = self._sources(str(row["id"]))
+        source_count = len({source.source_key for source in sources})
+        authoritative = len(
+            {
+                source.source_key
+                for source in sources
+                if source.authority >= 0.7 and source.content_class == "fact"
+            }
+        )
+        if source_count <= 1:
+            classification = "artifact"
+            status = "single_source"
+        elif authoritative >= 2:
+            classification = "corroborated_event"
+            status = "corroborated"
+        else:
+            classification = "associated_event"
+            status = "associated"
+        confidence = sum(source.confidence for source in sources) / max(1, len(sources))
+        linkage_reasons = tuple(
+            dict.fromkeys(
+                reason
+                for source in sources
+                for reason in (
+                    *source.matching_evidence,
+                    source.relationship.replace("_", " "),
+                )
+                if reason
+            )
+        )
         return LinkedEvent(
             id=str(row["id"]),
             title=str(row["title"]),
             primary_work_id=None if row["primary_work_id"] is None else str(row["primary_work_id"]),
             occurred_at=row["occurred_at"],
             corroboration=float(row["corroboration"]),
-            sources=self._sources(str(row["id"])),
+            source_count=source_count,
+            classification=classification,
+            corroboration_status=status,
+            association_confidence=confidence,
+            linkage_reason=(
+                "; ".join(linkage_reasons[:3])
+                if linkage_reasons
+                else "No cross-source association has been established."
+            ),
+            sources=sources,
         )
 
     def _sources(self, event_id: str) -> tuple[LinkedSourceEvidence, ...]:

@@ -6,6 +6,11 @@ export interface LinkedEvent {
   readonly primary_work_id: string | null;
   readonly occurred_at: string | null;
   readonly corroboration: number;
+  readonly source_count: number;
+  readonly classification: "artifact" | "associated_event" | "corroborated_event";
+  readonly corroboration_status: "single_source" | "associated" | "corroborated";
+  readonly association_confidence: number;
+  readonly linkage_reason: string;
   readonly sources: readonly LinkedSourceEvidence[];
 }
 
@@ -31,7 +36,10 @@ function event(value: unknown): value is LinkedEvent {
   return record(value) && typeof value.id === "string" && typeof value.title === "string" &&
     (typeof value.primary_work_id === "string" || value.primary_work_id === null) &&
     (typeof value.occurred_at === "string" || value.occurred_at === null) &&
-    typeof value.corroboration === "number" && Array.isArray(value.sources) && value.sources.every(source);
+    typeof value.corroboration === "number" && typeof value.source_count === "number" &&
+    typeof value.classification === "string" && typeof value.corroboration_status === "string" &&
+    typeof value.association_confidence === "number" && typeof value.linkage_reason === "string" &&
+    Array.isArray(value.sources) && value.sources.every(source);
 }
 
 export async function fetchLinkedEvents(fetcher: typeof fetch, base: string, signal: AbortSignal): Promise<LinkedEventPage> {

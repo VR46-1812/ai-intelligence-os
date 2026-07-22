@@ -17,6 +17,8 @@ describe("linked-event API", () => {
       items: [{
         id: "event-1", title: "Agent Memory", primary_work_id: "work-1",
         occurred_at: "2026-07-21T00:00:00Z", corroboration: 0.5,
+        source_count: 2, classification: "associated_event", corroboration_status: "associated",
+        association_confidence: 0.9, linkage_reason: "explicit repository URL",
         sources: [{ artifact_id: "repo-1", source_key: "github", artifact_type: "repository",
           title: "example/agent-memory", canonical_url: "https://github.com/example/agent-memory",
           relationship: "official_repository", content_class: "fact", authority: 0.85,

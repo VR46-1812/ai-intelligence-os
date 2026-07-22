@@ -51,6 +51,11 @@ class LinkedEvent(MultiSourceModel):
     primary_work_id: str | None
     occurred_at: UtcDateTime | None
     corroboration: float = Field(ge=0, le=1)
+    source_count: int = Field(ge=0)
+    classification: str
+    corroboration_status: str
+    association_confidence: float = Field(ge=0, le=1)
+    linkage_reason: str
     sources: tuple[LinkedSourceEvidence, ...]
 
 

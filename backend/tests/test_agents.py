@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from uuid import uuid4
 
-from app.agents.models import AgentInput, AgentOutput, AgentStatus
+from app.agents.models import AgentExecutionMode, AgentInput, AgentOutput, AgentStatus
 from app.agents.registry import AGENT_SPECS
 from app.agents.runtime import AgentRuntime, AgentStageError
 from app.config import AppSettings, PathSettings, initialize_directories
@@ -68,6 +68,9 @@ def test_agent_runtime_is_sequential_persisted_and_idempotent() -> None:
         assert calls == [spec.agent_id for spec in AGENT_SPECS]
         assert len(first) == len(second) == 14
         assert all(item.status is AgentStatus.SUCCEEDED for item in first)
+        assert all(item.execution_mode is AgentExecutionMode.DETERMINISTIC for item in first)
+        assert all(float(item.metrics["duration_ms"]) > 0 for item in first)
+        assert all(item.input_record_count == 0 and item.output_record_count == 0 for item in first)
         assert [item.stage_order for item in runtime.list_for_run("run-1")] == list(range(1, 15))
     finally:
         connection.close()

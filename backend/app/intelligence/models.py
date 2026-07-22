@@ -33,15 +33,31 @@ class RankedReportItem(IntelligenceModel):
 
 class LearningPlanItem(IntelligenceModel):
     topic: str
+    why_it_matters: str = "Build practical understanding of a ranked technical development."
     prerequisites: tuple[str, ...]
     estimated_minutes: int = Field(ge=10, le=180)
     recommended_item: str
     exercise: str
+    expected_outcome: str = "A concise implementation note tied to cited evidence."
+    evidence_ids: tuple[str, ...]
+
+
+class BuildPlanItem(IntelligenceModel):
+    work_id: str
+    prototype: str
+    user_problem: str
+    architecture: tuple[str, ...]
+    estimated_effort: str
+    recommended_resource: str
+    validation_test: str
+    project_relevance: tuple[str, ...]
     evidence_ids: tuple[str, ...]
 
 
 class CommercialHypothesis(IntelligenceModel):
     label: str = Field(pattern=r"^commercial_hypothesis$")
+    work_id: str = ""
+    title: str = "Evidence-backed commercial hypothesis"
     problem: str
     target_buyer: str
     proposed_offer: str
@@ -52,6 +68,9 @@ class CommercialHypothesis(IntelligenceModel):
     pricing_hypothesis: str
     competition: str
     risks: tuple[str, ...]
+    assumptions: tuple[str, ...] = ()
+    india_market_relevance: str = "India-market fit requires direct buyer validation."
+    project_relevance: tuple[str, ...] = ()
     confidence: float = Field(ge=0, le=1)
 
 
@@ -95,7 +114,7 @@ class DailyIntelligenceReport(IntelligenceModel):
     research_and_product_launches: tuple[str, ...] = ()
     community_signals: tuple[str, ...] = ()
     learning_plan: tuple[LearningPlanItem, ...] = ()
-    what_to_build: tuple[str, ...] = ()
+    what_to_build: tuple[BuildPlanItem, ...] = ()
     commercial_hypotheses: tuple[CommercialHypothesis, ...] = ()
     india_market_hypotheses: tuple[str, ...] = ()
     personal_relevance: tuple[ProjectRelevance, ...] = ()
@@ -136,12 +155,24 @@ class TopicOverview(IntelligenceModel):
 
 class Opportunity(IntelligenceModel):
     kind: str
+    label: str
     work_id: str
     title: str
     headline: str
     detail: str
     evidence_ids: tuple[str, ...]
     confidence: float = Field(ge=0, le=1)
+    target_customer: str | None = None
+    painful_workflow: str | None = None
+    proposed_offer: str | None = None
+    prototype: str | None = None
+    effort: str | None = None
+    provisional_pricing: str | None = None
+    validation_experiment: str | None = None
+    assumptions: tuple[str, ...] = ()
+    risks: tuple[str, ...] = ()
+    india_market_relevance: str | None = None
+    project_relevance: tuple[str, ...] = ()
 
 
 class EvaluationScores(IntelligenceModel):

@@ -1,6 +1,26 @@
 export interface TopicPaper { readonly work_id: string; readonly title: string; readonly score: number; }
 export interface TopicOverview { readonly key: string; readonly label: string; readonly paper_count: number; readonly daily_change: number; readonly papers: readonly TopicPaper[]; }
-export interface Opportunity { readonly kind: "engineering" | "commercial"; readonly work_id: string; readonly title: string; readonly headline: string; readonly detail: string; readonly evidence_ids: readonly string[]; readonly confidence: number; }
+export interface Opportunity {
+  readonly kind: "engineering" | "commercial";
+  readonly label: "build_opportunity" | "commercial_hypothesis";
+  readonly work_id: string;
+  readonly title: string;
+  readonly headline: string;
+  readonly detail: string;
+  readonly evidence_ids: readonly string[];
+  readonly confidence: number;
+  readonly target_customer: string | null;
+  readonly painful_workflow: string | null;
+  readonly proposed_offer: string | null;
+  readonly prototype: string | null;
+  readonly effort: string | null;
+  readonly provisional_pricing: string | null;
+  readonly validation_experiment: string | null;
+  readonly assumptions: readonly string[];
+  readonly risks: readonly string[];
+  readonly india_market_relevance: string | null;
+  readonly project_relevance: readonly string[];
+}
 
 export class IntelligenceApiError extends Error {}
 
@@ -12,9 +32,11 @@ function topic(value: unknown): value is TopicOverview {
 }
 function opportunity(value: unknown): value is Opportunity {
   return record(value) && (value.kind === "engineering" || value.kind === "commercial") &&
+    (value.label === "build_opportunity" || value.label === "commercial_hypothesis") &&
     typeof value.work_id === "string" && typeof value.title === "string" && typeof value.headline === "string" &&
     typeof value.detail === "string" && typeof value.confidence === "number" && Array.isArray(value.evidence_ids) &&
-    value.evidence_ids.every((id) => typeof id === "string");
+    value.evidence_ids.every((id) => typeof id === "string") && Array.isArray(value.assumptions) &&
+    Array.isArray(value.risks) && Array.isArray(value.project_relevance);
 }
 async function request(fetcher: typeof fetch, url: string, signal: AbortSignal): Promise<unknown> {
   const response = await fetcher(url, { signal, headers: { Accept: "application/json" } });

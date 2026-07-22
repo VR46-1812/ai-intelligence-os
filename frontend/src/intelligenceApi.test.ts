@@ -9,7 +9,10 @@ describe("intelligence output API", () => {
     ]), { status: 200 }));
     const opportunityFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify([
       { kind: "engineering", work_id: "work", title: "Bounded agents", headline: "Guarded loop",
-        detail: "Reduce tool errors", evidence_ids: ["ev-1"], confidence: 0.8 },
+        label: "build_opportunity", detail: "Reduce tool errors", evidence_ids: ["ev-1"], confidence: 0.8,
+        target_customer: null, painful_workflow: null, proposed_offer: null, prototype: "Guarded loop",
+        effort: null, provisional_pricing: null, validation_experiment: "Fixture test",
+        assumptions: [], risks: ["Transfer risk"], india_market_relevance: null, project_relevance: [] },
     ]), { status: 200 }));
 
     await expect(fetchTopics(topicsFetch, "/api", new AbortController().signal)).resolves.toHaveLength(1);

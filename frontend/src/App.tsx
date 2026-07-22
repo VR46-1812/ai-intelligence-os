@@ -1,159 +1,148 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import {
-  INITIAL_API_HEALTH_STATE,
-  resolveApiHealthState,
-  type ApiHealthState,
-} from "./apiHealth";
+import { INITIAL_API_HEALTH_STATE, resolveApiHealthState, type ApiHealthState } from "./apiHealth";
 import { ExplorePage } from "./ExplorePage";
-import { fetchModelStatus, type ModelStatus } from "./analysisApi";
+import { IntelligencePage } from "./IntelligencePage";
+import { runDailyNow } from "./operationsApi";
 import { ReportPage } from "./ReportPage";
-import { TodayPage } from "./TodayPage";
 import { SystemPage } from "./SystemPage";
-import { TopicsPage } from "./TopicsPage";
-import { OpportunitiesPage } from "./OpportunitiesPage";
+import { TodayPage } from "./TodayPage";
 
-const navigationItems = ["Today", "Explore", "Topics", "Opportunities", "System"] as const;
-type ActivePage = "today" | "explore" | "report" | "system" | "topics" | "opportunities";
-
-const healthCopy: Record<ApiHealthState, { label: string; detail: string }> = {
-  loading: {
-    label: "Checking local API",
-    detail: "Connecting to the workspace service…",
-  },
-  healthy: {
-    label: "Local API healthy",
-    detail: "Private catalog and discovery are ready.",
-  },
-  unavailable: {
-    label: "Local API unavailable",
-    detail: "Start the backend, then refresh this page.",
-  },
+type PrimaryPage = "daily" | "discover" | "intelligence" | "settings";
+type Route = {
+  readonly page: PrimaryPage | "report";
+  readonly detailId: string | null;
+  readonly intelligenceTab: "topics" | "opportunities";
 };
 
-function routeFromHash(): { page: ActivePage; paperId: string | null; analysisId: string | null } {
-  const route = window.location.hash.replace(/^#/, "");
-  if (route.startsWith("report/")) {
-    const analysisId = route.split("/")[1];
-    return { page: "report", paperId: null, analysisId: analysisId ? decodeURIComponent(analysisId) : null };
+const navigation: readonly { key: PrimaryPage; label: string; icon: string }[] = [
+  { key: "daily", label: "Daily Brief", icon: "D" },
+  { key: "discover", label: "Discover", icon: "⌕" },
+  { key: "intelligence", label: "Intelligence", icon: "I" },
+  { key: "settings", label: "Settings", icon: "⚙" },
+];
+
+function routeFromHash(): Route {
+  const raw = window.location.hash.replace(/^#/, "");
+  if (raw.startsWith("report/")) {
+    return { page: "report", detailId: decodeURIComponent(raw.split("/")[1] ?? ""), intelligenceTab: "topics" };
   }
-  if (route.startsWith("explore")) {
-    const encodedPaperId = route.split("/")[1];
-    return {
-      page: "explore",
-      paperId: encodedPaperId ? decodeURIComponent(encodedPaperId) : null,
-      analysisId: null,
-    };
+  if (raw.startsWith("discover/") || raw.startsWith("explore/")) {
+    return { page: "discover", detailId: decodeURIComponent(raw.split("/")[1] ?? ""), intelligenceTab: "topics" };
   }
-  if (route === "system") return { page: "system", paperId: null, analysisId: null };
-  if (route === "topics") return { page: "topics", paperId: null, analysisId: null };
-  if (route === "opportunities") return { page: "opportunities", paperId: null, analysisId: null };
-  return { page: "today", paperId: null, analysisId: null };
+  if (raw === "discover" || raw === "explore") return { page: "discover", detailId: null, intelligenceTab: "topics" };
+  if (raw === "intelligence/opportunities" || raw === "opportunities") {
+    return { page: "intelligence", detailId: null, intelligenceTab: "opportunities" };
+  }
+  if (raw === "intelligence" || raw === "intelligence/topics" || raw === "topics") {
+    return { page: "intelligence", detailId: null, intelligenceTab: "topics" };
+  }
+  if (raw === "settings" || raw === "system") return { page: "settings", detailId: null, intelligenceTab: "topics" };
+  return { page: "daily", detailId: null, intelligenceTab: "topics" };
+}
+
+function CommandPalette({ close, apiBaseUrl }: { readonly close: () => void; readonly apiBaseUrl: string }) {
+  const input = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const commands = [
+    { label: "Search stored research", hint: "Discover", href: "#discover" },
+    { label: "Run daily pipeline", hint: "Daily Brief", href: "#daily", action: "run" },
+    { label: "Open latest brief", hint: "Daily Brief", href: "#daily" },
+    { label: "Discover by source or topic", hint: "Filters", href: "#discover" },
+    { label: "View opportunities", hint: "Intelligence", href: "#intelligence/opportunities" },
+    { label: "Inspect operations", hint: "Settings", href: "#settings" },
+  ].filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
+
+  useEffect(() => input.current?.focus(), []);
+
+  return (
+    <div className="palette-backdrop" role="presentation" onMouseDown={close}>
+      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Command palette" onMouseDown={(event) => event.stopPropagation()}>
+        <label>
+          <span aria-hidden="true">⌕</span>
+          <input ref={input} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search or run a command…" aria-label="Search commands" />
+          <kbd>Esc</kbd>
+        </label>
+        <ul>
+          {commands.map((item) => (
+            <li key={item.label}>
+              <a href={item.href} onClick={() => { close(); if (item.action === "run") void runDailyNow(fetch, apiBaseUrl); }}>
+                <span>{item.label}</span><small>{item.hint}</small>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
 }
 
 function App() {
-  const [healthState, setHealthState] = useState<ApiHealthState>(INITIAL_API_HEALTH_STATE);
   const [route, setRoute] = useState(routeFromHash);
-  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [health, setHealth] = useState<ApiHealthState>(INITIAL_API_HEALTH_STATE);
+  const [railCollapsed, setRailCollapsed] = useState(true);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "/api";
-  const formattedDate = new Intl.DateTimeFormat("en", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  }).format(new Date());
 
   useEffect(() => {
-    const onHashChange = () => setRoute(routeFromHash());
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    const onHash = () => setRoute(routeFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   useEffect(() => {
     const controller = new AbortController();
-    void resolveApiHealthState(fetch, `${apiBaseUrl}/health`, controller.signal).then(
-      (nextState) => {
-        if (!controller.signal.aborted) setHealthState(nextState);
-      },
-    );
+    void resolveApiHealthState(fetch, `${apiBaseUrl}/health`, controller.signal).then(setHealth);
     return () => controller.abort();
   }, [apiBaseUrl]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void fetchModelStatus(fetch, apiBaseUrl, controller.signal).then(setModelStatus).catch(() => undefined);
-    return () => controller.abort();
-  }, [apiBaseUrl]);
+    const keyboard = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+      if (event.key === "Escape") setPaletteOpen(false);
+    };
+    window.addEventListener("keydown", keyboard);
+    return () => window.removeEventListener("keydown", keyboard);
+  }, []);
 
-  const currentHealth = healthCopy[healthState];
-
+  const active = route.page === "report" ? "discover" : route.page;
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <a className="brand" href="#today" aria-label="AI Intelligence OS home">
-          <span className="brand-mark" aria-hidden="true">AI</span>
-          <span>
-            <strong>Intelligence OS</strong>
-            <small>Local research workspace</small>
-          </span>
-        </a>
-
+    <div className={`product-shell ${railCollapsed ? "rail-collapsed" : ""}`}>
+      <aside className="icon-rail">
+        <a className="product-mark" href="#daily" aria-label="AI Intelligence OS Daily Brief">AI</a>
         <nav aria-label="Primary navigation">
-          <p className="nav-label">Workspace</p>
-          <ul>
-            {navigationItems.map((item) => {
-              const itemKey = item.toLowerCase();
-              const implemented = true;
-              return (
-                <li key={item}>
-                  <a
-                    className={route.page === itemKey ? "active" : implemented ? undefined : "disabled"}
-                    href={implemented ? `#${itemKey}` : undefined}
-                    aria-disabled={!implemented}
-                  >
-                    <span className="nav-dot" aria-hidden="true" />
-                    {item}
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
+          {navigation.map((item) => (
+            <a key={item.key} href={`#${item.key}`} className={active === item.key ? "active" : undefined} aria-current={active === item.key ? "page" : undefined}>
+              <span aria-hidden="true">{item.icon}</span><strong>{item.label}</strong>
+            </a>
+          ))}
         </nav>
-
-        <div className="local-note">
-          <span className="lock" aria-hidden="true">LOCAL</span>
-          <p>Your papers, metadata, and future analysis stay on this machine.</p>
-        </div>
+        <button className="rail-toggle" type="button" onClick={() => setRailCollapsed((value) => !value)} aria-label={railCollapsed ? "Expand navigation" : "Collapse navigation"}>⇤</button>
       </aside>
 
-      <div className="workspace" id="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">{formattedDate} · Local workspace</p>
-            <h1>{route.page === "explore" ? "Explore" : route.page === "report" ? "Deep Dive" : route.page === "system" ? "System" : route.page === "topics" ? "Topics" : route.page === "opportunities" ? "Opportunities" : "Today"}</h1>
-          </div>
-          <div className="topbar-statuses"><div className={modelStatus?.available && modelStatus.model_installed ? "model-pill ready" : "model-pill"} title={modelStatus?.detail ?? "Checking local model"}><span />Scout · {modelStatus?.model ?? "checking"}</div><div className={`health-pill ${healthState}`} role="status" aria-live="polite">
-            <span className="status-dot" aria-hidden="true" />
-            <span>
-              <strong>{currentHealth.label}</strong>
-              <small>{currentHealth.detail}</small>
-            </span>
-          </div></div>
+      <div className="product-workspace">
+        <header className="product-topbar">
+          <a href="#daily" className="mobile-brand">AI Intelligence OS</a>
+          <button className="palette-trigger" type="button" onClick={() => setPaletteOpen(true)}>
+            <span>⌕</span><span>Search or command</span><kbd>Ctrl K</kbd>
+          </button>
+          <span className={`api-indicator ${health}`} role="status" title={`Local API: ${health}`}><i />Local API {health}</span>
         </header>
 
-        {route.page === "explore" ? (
-          <ExplorePage apiBaseUrl={apiBaseUrl} initialPaperId={route.paperId} />
-        ) : route.page === "system" ? (
-          <SystemPage apiBaseUrl={apiBaseUrl} />
-        ) : route.page === "topics" ? (
-          <TopicsPage apiBaseUrl={apiBaseUrl} />
-        ) : route.page === "opportunities" ? (
-          <OpportunitiesPage apiBaseUrl={apiBaseUrl} />
-        ) : route.page === "report" && route.analysisId ? (
-          <ReportPage apiBaseUrl={apiBaseUrl} analysisId={route.analysisId} />
-        ) : (
-          <TodayPage apiBaseUrl={apiBaseUrl} healthState={healthState} healthLabel={currentHealth.label} />
-        )}
+        {route.page === "discover" ? <ExplorePage apiBaseUrl={apiBaseUrl} initialPaperId={route.detailId} />
+          : route.page === "intelligence" ? <IntelligencePage apiBaseUrl={apiBaseUrl} initialTab={route.intelligenceTab} />
+            : route.page === "settings" ? <SystemPage apiBaseUrl={apiBaseUrl} />
+              : route.page === "report" && route.detailId ? <ReportPage apiBaseUrl={apiBaseUrl} analysisId={route.detailId} />
+                : <TodayPage apiBaseUrl={apiBaseUrl} healthState={health} healthLabel={`Local API ${health}`} />}
       </div>
+
+      <nav className="bottom-nav" aria-label="Mobile navigation">
+        {navigation.map((item) => <a key={item.key} href={`#${item.key}`} className={active === item.key ? "active" : undefined}><span>{item.icon}</span>{item.label}</a>)}
+      </nav>
+      {paletteOpen && <CommandPalette close={() => setPaletteOpen(false)} apiBaseUrl={apiBaseUrl} />}
     </div>
   );
 }

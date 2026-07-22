@@ -22,6 +22,10 @@ export interface AgentExecution {
   readonly safe_failure_reason: string | null;
   readonly started_at: string | null;
   readonly completed_at: string | null;
+  readonly execution_mode: "executed" | "cached" | "reused" | "deterministic" | "skipped";
+  readonly input_record_count: number;
+  readonly output_record_count: number;
+  readonly reused_from_run_id: string | null;
 }
 
 export interface AgentRunView {

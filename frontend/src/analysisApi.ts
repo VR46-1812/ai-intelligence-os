@@ -116,6 +116,58 @@ export interface RankedDailyItem {
   readonly score: number;
   readonly reason: string;
   readonly status: string;
+  readonly model_signal?: {
+    readonly novelty: number;
+    readonly method_depth: number;
+    readonly impact: number;
+    readonly opportunity: number;
+    readonly confidence: number;
+    readonly evidence_ids: readonly string[];
+    readonly fallback: boolean;
+  } | null;
+}
+
+export interface LearningPlanItem {
+  readonly topic: string;
+  readonly why_it_matters: string;
+  readonly prerequisites: readonly string[];
+  readonly estimated_minutes: number;
+  readonly recommended_item: string;
+  readonly exercise: string;
+  readonly expected_outcome: string;
+  readonly evidence_ids: readonly string[];
+}
+
+export interface BuildPlanItem {
+  readonly work_id: string;
+  readonly prototype: string;
+  readonly user_problem: string;
+  readonly architecture: readonly string[];
+  readonly estimated_effort: string;
+  readonly recommended_resource: string;
+  readonly validation_test: string;
+  readonly project_relevance: readonly string[];
+  readonly evidence_ids: readonly string[];
+}
+
+export interface CommercialHypothesis {
+  readonly label: "commercial_hypothesis";
+  readonly work_id: string;
+  readonly title: string;
+  readonly problem: string;
+  readonly target_buyer: string;
+  readonly proposed_offer: string;
+  readonly supporting_evidence: readonly string[];
+  readonly prototype: string;
+  readonly effort: string;
+  readonly validation_experiment: string;
+  readonly pricing_hypothesis: string;
+  readonly competition: string;
+  readonly risks: readonly string[];
+  readonly assumptions: readonly string[];
+  readonly india_market_relevance: string;
+  readonly project_relevance: readonly string[];
+  readonly confidence: number;
 }
 
 export interface DailyIntelligenceReport {
@@ -132,6 +184,22 @@ export interface DailyIntelligenceReport {
   readonly important_updates: readonly Record<string, string>[];
   readonly learning_focus: readonly string[];
   readonly coverage_gaps: readonly string[];
+  readonly executive_briefing: string;
+  readonly what_happened: readonly string[];
+  readonly why_it_matters: readonly string[];
+  readonly evidence_versus_interpretation: readonly string[];
+  readonly research_and_product_launches: readonly string[];
+  readonly community_signals: readonly string[];
+  readonly learning_plan: readonly LearningPlanItem[];
+  readonly what_to_build: readonly BuildPlanItem[];
+  readonly commercial_hypotheses: readonly CommercialHypothesis[];
+  readonly risks_and_unknowns: readonly string[];
+  readonly watchlist_changes: readonly string[];
+  readonly source_coverage: readonly {
+    readonly source_key: string;
+    readonly records: number;
+    readonly status: string;
+  }[];
 }
 
 export class AnalysisApiError extends Error {
@@ -208,7 +276,10 @@ export async function fetchCompleteDailyReport(fetcher: typeof fetch, base: stri
       !isRecord(value.pipeline) || typeof value.pipeline.run_id !== "string" ||
       !Array.isArray(value.top_technical) || !Array.isArray(value.top_commercial) ||
       !Array.isArray(value.deep_dives) || !value.deep_dives.every((id) => typeof id === "string") ||
-      !Array.isArray(value.learning_focus) || !Array.isArray(value.coverage_gaps)) {
+      !Array.isArray(value.learning_focus) || !Array.isArray(value.coverage_gaps) ||
+      typeof value.executive_briefing !== "string" || !Array.isArray(value.learning_plan) ||
+      !Array.isArray(value.what_to_build) || !Array.isArray(value.commercial_hypotheses) ||
+      !Array.isArray(value.source_coverage)) {
     throw new AnalysisApiError("The final daily report response was invalid.");
   }
   return value as unknown as DailyIntelligenceReport;

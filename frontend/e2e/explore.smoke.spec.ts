@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("Explore loads stored SQLite papers, searches, opens detail, and reports sync", async ({
+test("Discover loads stored SQLite papers, filters, opens detail, and reports sync", async ({
   page,
 }) => {
   await page.route("**/sources/arxiv/sync", async (route) => {
@@ -19,15 +19,15 @@ test("Explore loads stored SQLite papers, searches, opens detail, and reports sy
       }),
     });
   });
-  await page.goto("/#explore");
+  await page.goto("/#discover");
 
-  await expect(page.getByRole("heading", { name: "Explore papers worth understanding." })).toBeVisible();
-  await expect(page.locator(".paper-card")).toHaveCount(5);
-  await expect(page.getByText(/\d+ stored papers/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Discover research worth understanding." })).toBeVisible();
+  await expect(page.locator(".paper-card").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: /stored papers?/i })).toBeVisible();
   await expect(page.getByLabel("Source type")).toBeVisible();
   await expect(page.getByLabel("Minimum authority")).toBeVisible();
-  await expect(page.getByLabel("Minimum corroboration")).toBeVisible();
-  await expect(page.getByLabel("Linked events only")).toBeVisible();
+  await expect(page.getByLabel("Linked evidence")).toBeVisible();
+  await expect(page.getByLabel("Associated events only")).toBeVisible();
 
   const firstTitle = page.locator(".paper-title").first();
   const title = await firstTitle.textContent();
@@ -54,18 +54,19 @@ test("Explore loads stored SQLite papers, searches, opens detail, and reports sy
   );
 });
 
-test("Explore remains usable at mobile width", async ({ page }) => {
+test("Discover remains usable without horizontal overflow at mobile width", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/#explore");
+  await page.goto("/#discover");
 
   await expect(page.getByRole("searchbox", { name: "Search stored papers" })).toBeVisible();
   await expect(page.getByLabel("Topic")).toBeVisible();
   await expect(page.locator(".paper-card").first()).toBeVisible();
   await page.locator(".paper-title").first().click();
   await expect(page.getByRole("complementary", { name: "Paper detail" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });
 
-test("Explore communicates loading, empty, and API failure states", async ({ page }) => {
+test("Discover communicates loading, empty, and API failure states", async ({ page }) => {
   await page.route("**/items?**", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 250));
     await route.fulfill({
@@ -74,7 +75,7 @@ test("Explore communicates loading, empty, and API failure states", async ({ pag
       body: JSON.stringify({ items: [], total: 0, limit: 5, offset: 0, has_more: false }),
     });
   });
-  await page.goto("/#explore");
+  await page.goto("/#discover");
 
   await expect(page.getByLabel("Loading research papers")).toBeVisible();
   await expect(page.getByRole("heading", { name: "No papers match this view" })).toBeVisible();

@@ -19,6 +19,11 @@ from app.config import REPOSITORY_ROOT, AppSettings, PathSettings, initialize_di
 from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.domain.models import AnalysisStatus, AnalysisType
 from app.intelligence.evaluation import evaluate_golden_set, load_human_review_set
+from app.intelligence.models import (
+    CommercialHypothesis,
+    DailyIntelligenceReport,
+    PipelineReportSummary,
+)
 from app.intelligence.service import IntelligenceOutputService
 from app.operations.models import DailyCounts
 from app.operations.service import ProductionDailyRunner
@@ -396,6 +401,80 @@ def test_v1_human_review_cases_are_independent_and_cover_release_risks() -> None
         "personal_project_relevance",
     }
     assert all(case.input_summary != case.pass_criteria for case in review.cases)
+
+
+def test_daily_hypotheses_are_the_canonical_opportunity_source(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    _, connection = analysis_store
+    report = DailyIntelligenceReport(
+        schema_version="1.0",
+        report_date="2026-07-22",
+        pipeline=PipelineReportSummary(
+            discovered=1,
+            normalized=1,
+            filtered=1,
+            shortlisted=1,
+            briefed=1,
+            analyzed=1,
+            failed=0,
+            run_id="daily-run",
+        ),
+        top_technical=(),
+        top_commercial=(),
+        deep_dives=(),
+        important_updates=(),
+        learning_focus=(),
+        coverage_gaps=(),
+        commercial_hypotheses=(
+            CommercialHypothesis(
+                label="commercial_hypothesis",
+                work_id="work",
+                title="Grounded paper",
+                problem="Teams cannot validate cited retrieval quality quickly.",
+                target_buyer="Indian software teams",
+                proposed_offer="A fixed-scope validation pilot",
+                supporting_evidence=("ev-1",),
+                prototype="Local evaluation harness",
+                effort="Two days",
+                validation_experiment="Request one paid pilot within 48 hours.",
+                pricing_hypothesis="INR 50,000 pilot",
+                competition="Internal evaluation",
+                risks=("Buyer urgency is unknown.",),
+                assumptions=("The fixture represents production traffic.",),
+                india_market_relevance="Fixed-scope procurement-friendly pilot.",
+                project_relevance=("BidReady",),
+                confidence=0.6,
+            ),
+        ),
+    )
+    with transaction(connection):
+        connection.execute(
+            """INSERT INTO pipeline_runs(id,run_type,trigger_type,status,config_snapshot_json,
+            queued_at,completed_at) VALUES('daily-run','daily','manual','succeeded','{}',?,?)""",
+            ("2026-07-22T00:00:00Z", "2026-07-22T00:01:00Z"),
+        )
+        connection.execute(
+            """INSERT INTO daily_reports(report_date,schema_version,pipeline_run_id,
+            input_fingerprint,report_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)""",
+            (
+                report.report_date,
+                "1.0",
+                "daily-run",
+                "fingerprint",
+                report.model_dump_json(),
+                "2026-07-22T00:01:00Z",
+                "2026-07-22T00:01:00Z",
+            ),
+        )
+
+    opportunities = IntelligenceOutputService(connection).opportunities()
+
+    commercial = next(item for item in opportunities if item.kind == "commercial")
+    assert commercial.label == "commercial_hypothesis"
+    assert commercial.work_id == "work" and commercial.evidence_ids == ("ev-1",)
+    assert commercial.target_customer == "Indian software teams"
+    assert commercial.provisional_pricing == "INR 50,000 pilot"
 
 
 def test_invalid_or_unsupported_output_gets_exactly_one_repair(

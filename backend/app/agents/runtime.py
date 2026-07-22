@@ -5,10 +5,18 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 
-from app.agents.models import AgentExecution, AgentInput, AgentOutput, AgentRunView, AgentStatus
+from app.agents.models import (
+    AgentExecution,
+    AgentExecutionMode,
+    AgentInput,
+    AgentOutput,
+    AgentRunView,
+    AgentStatus,
+)
 from app.agents.registry import AGENT_SPECS
 from app.catalog.identity import new_ulid
 from app.db import transaction
@@ -74,6 +82,7 @@ class AgentRuntime:
             )
             self._start(execution_id, run_id, spec, key, attempt, input_value)
             started = self._clock()
+            started_counter = time.perf_counter_ns()
             try:
                 output = await handler(input_value)
                 if not output.summary.strip():
@@ -84,10 +93,14 @@ class AgentRuntime:
                     if isinstance(error, AgentStageError)
                     else f"{spec.name} stopped safely; retry from this stage."
                 )
-                self._finish(execution_id, AgentStatus.FAILED, None, safe_reason, started)
+                self._finish(
+                    execution_id, AgentStatus.FAILED, None, safe_reason, started, started_counter
+                )
                 self._skip_after(run_id, spec.order)
                 raise AgentStageError(spec.agent_id, safe_reason) from error
-            self._finish(execution_id, AgentStatus.SUCCEEDED, output, None, started)
+            self._finish(
+                execution_id, AgentStatus.SUCCEEDED, output, None, started, started_counter
+            )
             row = self._by_key(key)
             if row is None:
                 raise AgentStageError(spec.agent_id, "Agent checkpoint could not be persisted.")
@@ -214,9 +227,12 @@ class AgentRuntime:
         output: AgentOutput | None,
         safe_reason: str | None,
         started: datetime,
+        started_counter: int,
     ) -> None:
         completed = self._clock()
-        duration_ms = max(0.0, (completed - started).total_seconds() * 1000)
+        wall_duration = max(0.0, (completed - started).total_seconds() * 1000)
+        precise_duration = max(0.001, (time.perf_counter_ns() - started_counter) / 1_000_000)
+        duration_ms = max(wall_duration, precise_duration)
         metrics = {} if output is None else dict(output.metrics)
         metrics["duration_ms"] = duration_ms
         with transaction(self._connection):
@@ -246,6 +262,16 @@ class AgentRuntime:
     @staticmethod
     def _row(row: sqlite3.Row) -> AgentExecution:
         output = None if row["output_json"] is None else json.loads(str(row["output_json"]))
+        parsed_output = None if output is None else AgentOutput.model_validate(output)
+        mode = (
+            AgentExecutionMode.SKIPPED
+            if str(row["status"]) == AgentStatus.SKIPPED.value
+            else (
+                AgentExecutionMode.DETERMINISTIC
+                if parsed_output is None
+                else parsed_output.execution_mode
+            )
+        )
         return AgentExecution(
             id=str(row["id"]),
             pipeline_run_id=str(row["pipeline_run_id"]),
@@ -264,4 +290,10 @@ class AgentRuntime:
             safe_failure_reason=row["safe_failure_reason"],
             started_at=row["started_at"],
             completed_at=row["completed_at"],
+            execution_mode=mode,
+            input_record_count=(0 if parsed_output is None else parsed_output.input_record_count),
+            output_record_count=(0 if parsed_output is None else parsed_output.output_record_count),
+            reused_from_run_id=(
+                None if parsed_output is None else parsed_output.reused_from_run_id
+            ),
         )

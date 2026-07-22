@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime
 from typing import cast
+
+from pydantic import JsonValue
 
 from app.analysis.models import AnalysisResult, DeepDiveReport, FastBrief
 from app.analysis.service import AnalysisServiceError, ScoutAnalysisService
@@ -14,6 +17,7 @@ from app.catalog.identity import new_ulid
 from app.db import transaction
 from app.domain.models import AnalysisStatus, AnalysisType, JsonObject
 from app.intelligence.models import (
+    BuildPlanItem,
     CommercialHypothesis,
     DailyIntelligenceReport,
     DeepDiveProgress,
@@ -394,11 +398,19 @@ class IntelligenceOutputService:
         failed = int(counts_raw.get("documents_failed", 0))
         learning_focus = self._learning_focus()
         coverage_gaps = self._coverage_gaps()
+        event_rows = self._connection.execute(
+            """SELECT le.title,COUNT(DISTINCT sa.source_key) FROM linked_events le
+            LEFT JOIN linked_event_artifacts lea ON lea.event_id=le.id AND lea.active=1
+            LEFT JOIN source_artifacts sa ON sa.id=lea.artifact_id
+            GROUP BY le.id,le.title ORDER BY le.occurred_at DESC,le.id LIMIT 8"""
+        ).fetchall()
         happened = tuple(
-            str(row[0])
-            for row in self._connection.execute(
-                "SELECT title FROM linked_events ORDER BY occurred_at DESC,id LIMIT 8"
+            (
+                f"{row[0]} connects {row[1]} related sources into one development."
+                if int(row[1]) > 1
+                else f"{row[0]} was recorded from a single source and is not corroborated."
             )
+            for row in event_rows
         )
         launches = tuple(
             str(row[0])
@@ -419,10 +431,17 @@ class IntelligenceOutputService:
         learning_plan = tuple(
             LearningPlanItem(
                 topic=topic,
+                why_it_matters=(
+                    f"Understanding {topic} helps evaluate the day's highest-priority "
+                    "research before implementation."
+                ),
                 prerequisites=("Read the cited primary source", "Review the stored evidence spans"),
                 estimated_minutes=45,
                 recommended_item=technical[0].title if technical else "No ranked item available",
                 exercise="Reproduce one bounded claim with a local fixture and record the result.",
+                expected_outcome=(
+                    "A one-page note explaining the claim, its evidence, and whether it reproduced."
+                ),
                 evidence_ids=(
                     ()
                     if not technical or technical[0].model_signal is None
@@ -449,6 +468,8 @@ class IntelligenceOutputService:
         commercial_hypotheses = tuple(
             CommercialHypothesis(
                 label="commercial_hypothesis",
+                work_id=item.work_id,
+                title=item.title,
                 problem=f"Teams lack validated operational guidance for {item.title}.",
                 target_buyer="Indian mid-market AI and software teams",
                 proposed_offer=(
@@ -465,6 +486,15 @@ class IntelligenceOutputService:
                 ),
                 competition="Existing consulting, internal engineering, and adjacent AI tooling.",
                 risks=("Evidence may not transfer to production.", "Buyer urgency is unvalidated."),
+                assumptions=(
+                    "The cited capability transfers to the buyer's production data.",
+                    "A bounded pilot can demonstrate measurable value within 48 hours.",
+                ),
+                india_market_relevance=(
+                    "Relevant to Indian mid-market teams that need fixed-scope validation before "
+                    "committing internal engineering capacity."
+                ),
+                project_relevance=("RentAssure", "SageAlpha", "BidReady", "US-school chatbot"),
                 confidence=min(0.75, 0.35 + item.score / 250),
             )
             for item in commercial
@@ -537,9 +567,13 @@ class IntelligenceOutputService:
             learning_focus=learning_focus,
             coverage_gaps=coverage_gaps,
             executive_briefing=(
-                f"{len(happened)} linked developments were reviewed; "
-                f"{len(technical)} technical priorities and {len(commercial_hypotheses)} "
-                "commercial hypotheses passed deterministic assembly."
+                f"Today's local run reviewed {len(happened)} developments across the configured "
+                "research and engineering sources. "
+                f"It elevated {len(technical)} technical priorities with primary evidence and "
+                f"retained {len(commercial_hypotheses)} explicitly unvalidated commercial "
+                "hypotheses. "
+                "Focus first on the leading development, then validate any build or buyer claim "
+                "against its cited source."
             ),
             what_happened=happened,
             why_it_matters=tuple(item.reason for item in technical[:5]),
@@ -551,7 +585,29 @@ class IntelligenceOutputService:
             community_signals=community,
             learning_plan=learning_plan,
             what_to_build=tuple(
-                f"Prototype one bounded integration for {item.title}." for item in technical[:3]
+                BuildPlanItem(
+                    work_id=item.work_id,
+                    prototype=f"Build a bounded local proof of concept for {item.title}.",
+                    user_problem=(
+                        "A technical team needs to determine whether the reported capability "
+                        "improves a real workflow without committing to a broad integration."
+                    ),
+                    architecture=(
+                        "Existing local evidence store",
+                        "One isolated adapter or evaluation harness",
+                        "Deterministic acceptance metrics",
+                    ),
+                    estimated_effort="One to three focused engineering days",
+                    recommended_resource=item.title,
+                    validation_test=(
+                        "Run the prototype on one representative fixture and compare it with the "
+                        "current deterministic baseline."
+                    ),
+                    project_relevance=("RentAssure", "SageAlpha", "BidReady"),
+                    evidence_ids=evidence_for_work(item),
+                )
+                for item in technical[:3]
+                if evidence_for_work(item)
             ),
             commercial_hypotheses=commercial_hypotheses,
             india_market_hypotheses=tuple(
@@ -590,7 +646,52 @@ class IntelligenceOutputService:
                 "DAILY_RUN_REQUIRED", "Run the daily pipeline first.", status_code=409
             )
         try:
-            return DailyIntelligenceReport.model_validate_json(str(row[0]))
+            raw_payload: object = json.loads(str(row[0]))
+            if not isinstance(raw_payload, dict):
+                raise ValueError("Daily report payload must be an object.")
+            payload = cast(JsonObject, raw_payload)
+            legacy_value = payload.get("what_to_build", [])
+            ranked_value = payload.get("top_technical", [])
+            legacy_builds = (
+                cast(list[object], legacy_value) if isinstance(legacy_value, list) else []
+            )
+            ranked = cast(list[object], ranked_value) if isinstance(ranked_value, list) else []
+
+            def ranked_text(index: int, key: str, default: str) -> str:
+                if index >= len(ranked) or not isinstance(ranked[index], dict):
+                    return default
+                value = cast(dict[str, object], ranked[index]).get(key)
+                return value if isinstance(value, str) else default
+
+            if any(isinstance(item, str) for item in legacy_builds):
+                payload["what_to_build"] = cast(
+                    JsonValue,
+                    [
+                        {
+                            "work_id": ranked_text(index, "work_id", ""),
+                            "prototype": str(item),
+                            "user_problem": (
+                                "Validate whether the cited capability improves a real workflow."
+                            ),
+                            "architecture": [
+                                "Local evidence store",
+                                "Bounded prototype",
+                                "Deterministic evaluation",
+                            ],
+                            "estimated_effort": "One to three focused engineering days",
+                            "recommended_resource": ranked_text(
+                                index, "title", "Stored primary research"
+                            ),
+                            "validation_test": (
+                                "Compare one representative fixture with the current baseline."
+                            ),
+                            "project_relevance": [],
+                            "evidence_ids": [],
+                        }
+                        for index, item in enumerate(legacy_builds)
+                    ],
+                )
+            return DailyIntelligenceReport.model_validate(payload)
         except ValueError as error:
             raise AnalysisServiceError(
                 "DAILY_REPORT_INVALID",
@@ -604,21 +705,28 @@ class IntelligenceOutputService:
         rows = self._connection.execute(
             """SELECT rr.work_id,v.title,rr.total_score,
             EXISTS(SELECT 1 FROM analysis_runs a WHERE a.work_id=rr.work_id
-              AND a.status='succeeded') analyzed
+              AND a.status='succeeded') analyzed,v.abstract
             FROM ranking_results rr JOIN ranking_profiles rp ON rp.id=rr.profile_id AND rp.active=1
             JOIN works w ON w.id=rr.work_id JOIN work_versions v ON v.id=w.current_version_id
             WHERE rr.score_kind=? ORDER BY rr.total_score DESC,rr.work_id LIMIT 10""",
             (kind,),
         ).fetchall()
+
+        def significance(abstract: object) -> str:
+            clean = re.sub(r"\s+", " ", str(abstract or "")).strip()
+            if not clean:
+                return (
+                    "Primary evidence is available for review; practical impact is not established."
+                )
+            sentence = re.split(r"(?<=[.!?])\s+", clean, maxsplit=1)[0]
+            return sentence if len(sentence) <= 240 else f"{sentence[:237].rstrip()}…"
+
         return tuple(
             RankedReportItem(
                 work_id=str(row[0]),
                 title=str(row[1]),
                 score=float(row[2]),
-                reason=(
-                    "Deterministic V1 score; the model hypothesis is separate "
-                    "and never changes order."
-                ),
+                reason=significance(row[4]),
                 status="analyzed" if row[3] else "unreviewed",
                 model_signal=signals.get(str(row[0])),
             )
@@ -735,12 +843,18 @@ class IntelligenceOutputService:
                     result.append(
                         Opportunity(
                             kind="engineering",
+                            label="build_opportunity",
                             work_id=str(row[0]),
                             title=str(row[1]),
                             headline=item.name,
                             detail=item.expected_value,
                             evidence_ids=evidence_ids,
                             confidence=min(report.method.confidence, report.evaluation.confidence),
+                            prototype=item.name,
+                            validation_experiment=(
+                                "Validate against one representative local fixture."
+                            ),
+                            risks=("Production transfer remains unverified.",),
                         )
                     )
             for item in report.commercial_hypotheses:
@@ -748,12 +862,54 @@ class IntelligenceOutputService:
                     result.append(
                         Opportunity(
                             kind="commercial",
+                            label="commercial_hypothesis",
                             work_id=str(row[0]),
                             title=str(row[1]),
                             headline=item.problem,
                             detail=f"{item.buyer}: {item.pilot}",
                             evidence_ids=item.evidence_ids,
                             confidence=item.confidence,
+                            target_customer=item.buyer,
+                            painful_workflow=item.problem,
+                            proposed_offer=item.pilot,
+                            validation_experiment=(
+                                "Interview five buyers and request one paid pilot."
+                            ),
+                            assumptions=("Buyer urgency remains unverified.",),
+                            risks=("Market demand and production transfer remain unverified.",),
                         )
                     )
+        try:
+            daily = self.latest_daily_report()
+        except AnalysisServiceError:
+            daily = None
+        if daily is not None:
+            existing = {(item.kind, item.work_id, item.headline) for item in result}
+            for item in daily.commercial_hypotheses:
+                key = ("commercial", item.work_id, item.problem)
+                if key in existing:
+                    continue
+                result.append(
+                    Opportunity(
+                        kind="commercial",
+                        label=item.label,
+                        work_id=item.work_id,
+                        title=item.title,
+                        headline=item.problem,
+                        detail=f"{item.target_buyer}: {item.proposed_offer}",
+                        evidence_ids=item.supporting_evidence,
+                        confidence=item.confidence,
+                        target_customer=item.target_buyer,
+                        painful_workflow=item.problem,
+                        proposed_offer=item.proposed_offer,
+                        prototype=item.prototype,
+                        effort=item.effort,
+                        provisional_pricing=item.pricing_hypothesis,
+                        validation_experiment=item.validation_experiment,
+                        assumptions=item.assumptions,
+                        risks=item.risks,
+                        india_market_relevance=item.india_market_relevance,
+                        project_relevance=item.project_relevance,
+                    )
+                )
         return tuple(result)

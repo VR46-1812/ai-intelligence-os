@@ -381,6 +381,11 @@ def test_paper_repository_model_and_announcement_become_one_linked_event() -> No
             "official-rss",
         }
         assert page.items[0].corroboration == 1.0
+        assert page.items[0].source_count == 3
+        assert page.items[0].classification == "corroborated_event"
+        assert page.items[0].corroboration_status == "corroborated"
+        assert page.items[0].association_confidence > 0
+        assert "official" in page.items[0].linkage_reason
         repository_artifact = next(
             source.artifact_id for source in page.items[0].sources if source.source_key == "github"
         )
@@ -397,6 +402,8 @@ def test_paper_repository_model_and_announcement_become_one_linked_event() -> No
             "official-rss",
         }
         assert corrected.corroboration == 0.5
+        assert corrected.source_count == 2
+        assert corrected.classification in {"associated_event", "corroborated_event"}
     finally:
         connection.close()
         shutil.rmtree(settings.paths.data_root, ignore_errors=True)

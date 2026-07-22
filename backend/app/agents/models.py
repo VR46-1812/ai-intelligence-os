@@ -22,6 +22,14 @@ class AgentStatus(StrEnum):
     SKIPPED = "skipped"
 
 
+class AgentExecutionMode(StrEnum):
+    EXECUTED = "executed"
+    CACHED = "cached"
+    REUSED = "reused"
+    DETERMINISTIC = "deterministic"
+    SKIPPED = "skipped"
+
+
 class AgentBudget(AgentModel):
     timeout_seconds: int = Field(ge=1, le=1800)
     maximum_input_tokens: int = Field(ge=0, le=8192)
@@ -57,6 +65,10 @@ class AgentInput(AgentModel):
 
 class AgentOutput(AgentModel):
     summary: str
+    execution_mode: AgentExecutionMode = AgentExecutionMode.DETERMINISTIC
+    input_record_count: int = Field(default=0, ge=0)
+    output_record_count: int = Field(default=0, ge=0)
+    reused_from_run_id: str | None = None
     values: JsonObject = Field(default_factory=dict)
     evidence_refs: tuple[str, ...] = ()
     provenance_refs: tuple[str, ...] = ()
@@ -81,6 +93,10 @@ class AgentExecution(AgentModel):
     safe_failure_reason: str | None
     started_at: UtcDateTime | None
     completed_at: UtcDateTime | None
+    execution_mode: AgentExecutionMode = AgentExecutionMode.DETERMINISTIC
+    input_record_count: int = Field(default=0, ge=0)
+    output_record_count: int = Field(default=0, ge=0)
+    reused_from_run_id: str | None = None
 
 
 class AgentRunView(AgentModel):
