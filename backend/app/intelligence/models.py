@@ -103,3 +103,17 @@ class EvaluationScores(IntelligenceModel):
     precision_at_10: float
     ndcg_at_10: float
     passed: bool
+
+
+class HumanReviewCase(IntelligenceModel):
+    id: str
+    category: str
+    input_summary: str
+    reviewer_question: str
+    expected_decision: str
+    pass_criteria: str
+
+
+class HumanReviewSet(IntelligenceModel):
+    version: str
+    cases: tuple[HumanReviewCase, ...] = Field(min_length=10)

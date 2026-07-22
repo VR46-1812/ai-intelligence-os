@@ -7,7 +7,13 @@ import math
 from importlib.resources import files
 from typing import Any
 
-from app.intelligence.models import EvaluationScores
+from app.intelligence.models import EvaluationScores, HumanReviewSet
+
+
+def load_human_review_set() -> HumanReviewSet:
+    return HumanReviewSet.model_validate_json(
+        files("app.intelligence").joinpath("human_review_v1.json").read_text(encoding="utf-8")
+    )
 
 
 def evaluate_golden_set() -> EvaluationScores:

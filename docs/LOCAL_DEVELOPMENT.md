@@ -120,16 +120,17 @@ uv run python -m app.operations.cli run-now
 uv run python -m app.operations.cli status
 uv run python -m app.operations.cli cleanup       # dry run
 uv run python -m app.operations.cli cleanup --apply
+```
 
 The deep-dive command uses `qwen3:4b` on demand and persists resumable
 `extract -> analyze -> skeptic_check -> verify_citations -> publish` stages. The daily run
 assembles the versioned report returned by `GET /reports/daily/complete`. Ranked topic and
 verified opportunity views are available at `#topics` and `#opportunities`.
-```
 
 The ordered path is arXiv sync and normalization, PDF acquisition and extraction, deterministic
-ranking, one top Scout brief, then retention cleanup. Each limit comes from the existing typed
-configuration. The UI exposes manual execution at `/#today` and `/#system`.
+ranking, one top Scout brief, up to two highest-priority resumable deep dives, final report
+assembly, then retention cleanup. Each limit comes from the existing typed configuration. The UI
+exposes manual execution at `/#today` and `/#system`.
 
 Catalog responses distinguish `submitted_at` (original Atom publication time),
 `arxiv_announced_at` (Atom update time for the stored version), and `locally_ingested_at`
@@ -267,7 +268,14 @@ custom destination must remain inside the configured data root:
 ```
 
 The backup command uses SQLite's online backup API, verifies integrity, writes
-through a temporary file, and atomically renames the completed backup.
+through a temporary file, atomically renames the completed backup, and writes a
+SHA-256/schema-migration manifest. With the application stopped, restore and verify a backup with:
+
+```powershell
+.\scripts\restore-database.ps1 backups\manual.db --overwrite
+```
+
+The restore is rejected if the backup or migration history differs from its manifest.
 
 Credentials such as `AIOS_SOURCES__GITHUB_TOKEN` are optional, environment-only
 `SecretStr` values. Their representation is redacted; do not place credentials

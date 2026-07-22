@@ -21,6 +21,8 @@ class DailyCounts(OperationsModel):
     works_ranked: int = Field(default=0, ge=0)
     briefs_generated: int = Field(default=0, ge=0)
     briefs_cached: int = Field(default=0, ge=0)
+    deep_dives_generated: int = Field(default=0, ge=0)
+    deep_dives_cached: int = Field(default=0, ge=0)
     files_cleaned: int = Field(default=0, ge=0)
 
 

@@ -9,6 +9,8 @@ export interface DailyCounts {
   readonly works_ranked: number;
   readonly briefs_generated: number;
   readonly briefs_cached: number;
+  readonly deep_dives_generated: number;
+  readonly deep_dives_cached: number;
   readonly files_cleaned: number;
 }
 
@@ -79,7 +81,8 @@ function nullableString(value: unknown): value is string | null {
 
 function counts(value: unknown): value is DailyCounts {
   return record(value) && ["fetched", "normalized", "documents_processed", "documents_failed",
-    "evidence_spans", "works_ranked", "briefs_generated", "briefs_cached", "files_cleaned"]
+    "evidence_spans", "works_ranked", "briefs_generated", "briefs_cached",
+    "deep_dives_generated", "deep_dives_cached", "files_cleaned"]
     .every((key) => typeof value[key] === "number");
 }
 

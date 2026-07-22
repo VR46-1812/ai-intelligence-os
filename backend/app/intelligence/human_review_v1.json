@@ -1,0 +1,101 @@
+{
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "ranking-01",
+      "category": "ranking_relevance",
+      "input_summary": "A recent agent tool-use paper matches the highest-weight controlled topic and includes parsed primary evidence.",
+      "reviewer_question": "Should this appear in the technical top ten ahead of an equally fresh unrelated vision paper?",
+      "expected_decision": "yes",
+      "pass_criteria": "The agent paper ranks higher and its deterministic relevance component explains why."
+    },
+    {
+      "id": "ranking-02",
+      "category": "ranking_relevance",
+      "input_summary": "An old off-topic paper has a model opportunity hypothesis while a current RAG paper has no model brief.",
+      "reviewer_question": "May the model hypothesis replace the deterministic ordering?",
+      "expected_decision": "no",
+      "pass_criteria": "The deterministic score remains authoritative and the model signal is displayed separately."
+    },
+    {
+      "id": "ranking-03",
+      "category": "ranking_relevance",
+      "input_summary": "Two papers tie on deterministic score but only one has a citation-verified Scout signal.",
+      "reviewer_question": "Is the tie order stable and inspectable across replay?",
+      "expected_decision": "yes",
+      "pass_criteria": "Replay produces the same deterministic order and exposes the confidence-shrunk signal without replacing the score."
+    },
+    {
+      "id": "unsupported-01",
+      "category": "unsupported_claims",
+      "input_summary": "A deep-dive fact claims a benchmark improvement but has no evidence ID.",
+      "reviewer_question": "Can the report publish the claim?",
+      "expected_decision": "reject",
+      "pass_criteria": "The verification stage rejects publication or removes the unsupported factual claim during the single repair."
+    },
+    {
+      "id": "unsupported-02",
+      "category": "unsupported_claims",
+      "input_summary": "A commercial recommendation is explicitly labeled as a hypothesis with unknowns and no asserted factual result.",
+      "reviewer_question": "May it remain in the report?",
+      "expected_decision": "qualified",
+      "pass_criteria": "It remains visibly hypothetical and is not presented as verified source fact."
+    },
+    {
+      "id": "unsupported-03",
+      "category": "unsupported_claims",
+      "input_summary": "A critical skeptic finding is unresolved and affects a major factual claim.",
+      "reviewer_question": "Should synthesis publish?",
+      "expected_decision": "reject",
+      "pass_criteria": "The skeptic gate blocks publication and exposes a safe retryable failure."
+    },
+    {
+      "id": "citation-01",
+      "category": "citation_correctness",
+      "input_summary": "A factual claim cites an evidence ID belonging to another paper.",
+      "reviewer_question": "Does the citation pass verification?",
+      "expected_decision": "no",
+      "pass_criteria": "The verifier rejects the unavailable evidence relationship."
+    },
+    {
+      "id": "citation-02",
+      "category": "citation_correctness",
+      "input_summary": "Every major claim cites a stored page span from the analyzed work and coverage is 100 percent.",
+      "reviewer_question": "Can the citation gate succeed?",
+      "expected_decision": "yes",
+      "pass_criteria": "All evidence IDs resolve to the work and reported coverage equals the stored relationships."
+    },
+    {
+      "id": "citation-03",
+      "category": "citation_correctness",
+      "input_summary": "A report section references a claim ID that is absent from the report claim inventory.",
+      "reviewer_question": "Can final synthesis introduce this unseen claim?",
+      "expected_decision": "no",
+      "pass_criteria": "Structured validation rejects the unknown claim reference before publication."
+    },
+    {
+      "id": "commercial-01",
+      "category": "commercial_hypothesis_labeling",
+      "input_summary": "A proposed pilot names a buyer and value metric but the paper does not validate market demand.",
+      "reviewer_question": "How must it be labeled?",
+      "expected_decision": "hypothesis",
+      "pass_criteria": "The opportunity is labeled commercial hypothesis with confidence and unknowns, not source fact."
+    },
+    {
+      "id": "commercial-02",
+      "category": "commercial_hypothesis_labeling",
+      "input_summary": "A production application links only to an unsupported recommendation claim.",
+      "reviewer_question": "May it appear as an evidence-backed engineering opportunity?",
+      "expected_decision": "no",
+      "pass_criteria": "It is excluded from Opportunities until at least one supported claim yields stored evidence IDs."
+    },
+    {
+      "id": "commercial-03",
+      "category": "commercial_hypothesis_labeling",
+      "input_summary": "A commercial hypothesis cites valid evidence for the technical capability but estimates buyer value without evidence.",
+      "reviewer_question": "Is the technical evidence sufficient to verify the buyer-value assertion?",
+      "expected_decision": "no",
+      "pass_criteria": "Technical capability remains cited while buyer value stays explicitly uncertain and requires validation."
+    }
+  ]
+}

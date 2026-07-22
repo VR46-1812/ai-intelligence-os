@@ -240,8 +240,6 @@ class ProductionDailyRunner:
             clock=self._clock,
             id_factory=self._id_factory,
         ).rank_catalog(limit=100)
-        generated = 0
-        cached = 0
         base_counts = DailyCounts(
             fetched=sync_result.ingestion.records_seen,
             normalized=sync_result.records_normalized,
@@ -269,26 +267,64 @@ class ProductionDailyRunner:
                 self._settings,
                 clock=self._clock,
             )
-            for work_id, _, _ in analysis.ranked_today(self._settings.scheduler.top_briefs):
-                result = await analysis.analyze(work_id, AnalysisType.FAST_BRIEF)
-                if result.status is not AnalysisStatus.SUCCEEDED:
-                    raise DailyPipelineError(
-                        result.safe_detail
-                        or "Scout brief generation failed safely; retry from System.",
-                        base_counts.model_copy(
-                            update={"briefs_generated": generated, "briefs_cached": cached}
-                        ),
-                    )
-                generated += int(not result.cached)
-                cached += int(result.cached)
+            analysis_counts = await self.run_analyses(analysis, base_counts)
         cleanup = RetentionCleaner(
             connection, self._settings.paths, self._settings.retention, clock=self._clock
         ).run(dry_run=False)
+        return analysis_counts.model_copy(
+            update={
+                "files_cleaned": cleanup.files_deleted,
+            }
+        )
+
+    async def run_analyses(
+        self, analysis: ScoutAnalysisService, base_counts: DailyCounts
+    ) -> DailyCounts:
+        briefs_generated = 0
+        briefs_cached = 0
+        for work_id, _, _ in analysis.ranked_today(self._settings.scheduler.top_briefs):
+            result = await analysis.analyze(work_id, AnalysisType.FAST_BRIEF)
+            if result.status is not AnalysisStatus.SUCCEEDED:
+                raise DailyPipelineError(
+                    result.safe_detail
+                    or "Scout brief generation failed safely; retry from System.",
+                    base_counts.model_copy(
+                        update={
+                            "briefs_generated": briefs_generated,
+                            "briefs_cached": briefs_cached,
+                        }
+                    ),
+                )
+            briefs_generated += int(not result.cached)
+            briefs_cached += int(result.cached)
+
+        intelligence = IntelligenceOutputService(analysis.connection, analysis)
+        deep_generated = 0
+        deep_cached = 0
+        limit = self._settings.daily_work.maximum_automatic_deep_dives
+        for work_id in intelligence.deep_dive_candidates(limit):
+            result, _ = await intelligence.run_deep_dive(work_id)
+            if result.status is not AnalysisStatus.SUCCEEDED:
+                raise DailyPipelineError(
+                    result.safe_detail
+                    or "A priority deep dive failed its local publication gates. Retry the run.",
+                    base_counts.model_copy(
+                        update={
+                            "briefs_generated": briefs_generated,
+                            "briefs_cached": briefs_cached,
+                            "deep_dives_generated": deep_generated,
+                            "deep_dives_cached": deep_cached,
+                        }
+                    ),
+                )
+            deep_generated += int(not result.cached)
+            deep_cached += int(result.cached)
         return base_counts.model_copy(
             update={
-                "briefs_generated": generated,
-                "briefs_cached": cached,
-                "files_cleaned": cleanup.files_deleted,
+                "briefs_generated": briefs_generated,
+                "briefs_cached": briefs_cached,
+                "deep_dives_generated": deep_generated,
+                "deep_dives_cached": deep_cached,
             }
         )
 

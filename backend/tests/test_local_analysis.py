@@ -12,14 +12,16 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from app.analysis.models import ModelStatus
+from app.analysis.models import DeepDiveReport, ModelStatus
 from app.analysis.ollama import OllamaClient, OllamaGeneration
 from app.analysis.service import ScoutAnalysisService
 from app.config import REPOSITORY_ROOT, AppSettings, PathSettings, initialize_directories
 from app.db import MigrationRunner, SQLiteDatabase, transaction
 from app.domain.models import AnalysisStatus, AnalysisType
-from app.intelligence.evaluation import evaluate_golden_set
+from app.intelligence.evaluation import evaluate_golden_set, load_human_review_set
 from app.intelligence.service import IntelligenceOutputService
+from app.operations.models import DailyCounts
+from app.operations.service import ProductionDailyRunner
 from app.repositories import SQLiteRepositories
 
 
@@ -140,7 +142,9 @@ def _brief(evidence_id: str = "ev-1") -> str:
     )
 
 
-def _deep_dive() -> str:
+def _deep_dive(
+    work_id: str = "work", title: str = "Local Agents", evidence_id: str = "ev-1"
+) -> str:
     def section(label: str) -> dict[str, object]:
         return {
             "markdown": f"The supplied evidence describes the distinct {label} aspect.",
@@ -151,8 +155,8 @@ def _deep_dive() -> str:
     return json.dumps(
         {
             "schema_version": "1.0",
-            "work_id": "work",
-            "title": "Local Agents",
+            "work_id": work_id,
+            "title": title,
             "publication_status": "preprint",
             "executive_significance": section("significance"),
             "problem_context": section("problem context"),
@@ -185,7 +189,7 @@ def _deep_dive() -> str:
                     "type": "fact",
                     "importance": "major",
                     "verification_status": "supported",
-                    "evidence_ids": ["ev-1"],
+                    "evidence_ids": [evidence_id],
                     "qualifier": None,
                 }
             ],
@@ -254,6 +258,114 @@ def test_deep_dive_stages_publish_once_and_resume_from_cache(
     assert scout.calls == 1
 
 
+def test_failed_deep_dive_resumes_same_job_without_duplicate_success(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    scout = FakeScout(["{}", "{}", _deep_dive()])
+    analysis = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+    intelligence = IntelligenceOutputService(connection, analysis)
+
+    failed, failed_progress = asyncio.run(intelligence.run_deep_dive("work"))
+    resumed, resumed_progress = asyncio.run(intelligence.run_deep_dive("work"))
+
+    assert failed.status is AnalysisStatus.FAILED
+    assert failed_progress.stages[0].status == "succeeded"
+    assert failed_progress.stages[1].status == "failed"
+    assert resumed.status is AnalysisStatus.SUCCEEDED
+    assert resumed_progress.job_id == failed_progress.job_id
+    assert all(stage.status == "succeeded" for stage in resumed_progress.stages)
+    assert connection.execute("SELECT COUNT(*) FROM deep_dive_jobs").fetchone()[0] == 1
+    assert (
+        connection.execute(
+            """SELECT COUNT(*) FROM analysis_runs
+        WHERE analysis_type='deep_dive' AND status='succeeded'"""
+        ).fetchone()[0]
+        == 1
+    )
+
+
+def test_daily_analysis_generates_brief_and_resumable_priority_deep_dive(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    with transaction(connection):
+        connection.execute(
+            """INSERT INTO source_records(id,source_id,upstream_id,canonical_url,payload_sha256,
+            raw_payload_path,observed_at,normalization_status) VALUES
+            ('record-2','source','2607.2','https://arxiv.org/abs/2607.2','hash-2','raw/y',
+            '2026-07-20T00:00:00Z','normalized')"""
+        )
+        connection.execute(
+            """INSERT INTO works(id,work_type,canonical_title,normalized_title,publication_status,
+            current_version_id,lifecycle_state,created_at,updated_at) VALUES
+            ('work-2','paper','Verified Retrieval','verified retrieval','preprint','version-2',
+            'parsed','2026-07-20T00:00:00Z','2026-07-20T00:00:00Z')"""
+        )
+        connection.execute(
+            """INSERT INTO work_versions(id,work_id,version_label,title,source_record_id,
+            observed_at,is_current) VALUES
+            ('version-2','work-2','v1','Verified Retrieval','record-2',
+            '2026-07-20T00:00:00Z',1)"""
+        )
+        connection.execute(
+            """INSERT INTO documents(id,work_version_id,document_role,source_url,local_path,
+            media_type,byte_size,sha256,parse_status,acquired_at) VALUES
+            ('document-2','version-2','paper_pdf','https://arxiv.org/pdf/2607.2','raw/p2.pdf',
+            'application/pdf',100,'dochash2','parsed','2026-07-20T00:00:00Z')"""
+        )
+        connection.execute(
+            """INSERT INTO evidence_spans(id,document_id,page_start,page_end,char_start,char_end,
+            span_text,normalized_text_sha256,created_at) VALUES
+            ('ev-4','document-2',1,1,0,100,'Retrieval claims are citation verified.',
+            'evhash4','2026-07-20T00:00:00Z')"""
+        )
+        connection.execute(
+            """INSERT INTO ranking_results(id,work_id,profile_id,score_kind,total_score,
+            components_json,feature_snapshot_json,calculated_at) VALUES
+            ('rank-deep','work','rank-profile','deep_dive_priority',88,'{}','{}',
+            '2026-07-20T00:00:00Z')"""
+        )
+        connection.execute(
+            """INSERT INTO ranking_results(id,work_id,profile_id,score_kind,total_score,
+            components_json,feature_snapshot_json,calculated_at) VALUES
+            ('rank-deep-2','work-2','rank-profile','deep_dive_priority',89,'{}','{}',
+            '2026-07-20T00:00:00Z')"""
+        )
+    scout = FakeScout(
+        [
+            _brief(),
+            _deep_dive("work-2", "Verified Retrieval", "ev-4"),
+            _deep_dive(),
+        ]
+    )
+    analysis = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+    runner = ProductionDailyRunner(
+        settings,
+        SQLiteDatabase(settings.paths.database_path),
+        asyncio.Lock(),
+        asyncio.Lock(),
+        asyncio.Semaphore(1),
+    )
+
+    first = asyncio.run(runner.run_analyses(analysis, DailyCounts(works_ranked=1)))
+    resumed = asyncio.run(runner.run_analyses(analysis, DailyCounts(works_ranked=1)))
+
+    assert first.briefs_generated == 1 and first.deep_dives_generated == 2
+    assert resumed.briefs_cached == 1 and resumed.deep_dives_cached == 2
+    assert scout.calls == 3
+    assert (
+        connection.execute(
+            "SELECT COUNT(*) FROM analysis_runs WHERE status='succeeded'"
+        ).fetchone()[0]
+        == 3
+    )
+
+
 def test_golden_output_and_ranking_evaluation_meets_versioned_thresholds() -> None:
     scores = evaluate_golden_set()
 
@@ -262,6 +374,21 @@ def test_golden_output_and_ranking_evaluation_meets_versioned_thresholds() -> No
     assert scores.repetition_rate == 0 and scores.unsupported_rejection == 1
     assert scores.precision_at_10 == 1 and scores.ndcg_at_10 == 1
     assert scores.passed is True
+
+
+def test_v1_human_review_cases_are_independent_and_cover_release_risks() -> None:
+    review = load_human_review_set()
+    categories = {case.category for case in review.cases}
+
+    assert review.version == "1.0.0" and len(review.cases) >= 10
+    assert len({case.id for case in review.cases}) == len(review.cases)
+    assert categories == {
+        "ranking_relevance",
+        "unsupported_claims",
+        "citation_correctness",
+        "commercial_hypothesis_labeling",
+    }
+    assert all(case.input_summary != case.pass_criteria for case in review.cases)
 
 
 def test_invalid_or_unsupported_output_gets_exactly_one_repair(
@@ -294,6 +421,24 @@ def test_repetitive_output_gets_one_quality_repair(
 
     assert result.status is AnalysisStatus.SUCCEEDED
     assert scout.calls == 2
+
+
+def test_known_enum_label_with_explanation_is_normalized_without_repair(
+    analysis_store: tuple[AppSettings, sqlite3.Connection],
+) -> None:
+    settings, connection = analysis_store
+    payload = json.loads(_deep_dive())
+    payload["skeptic_findings"][0]["resolution"] = "Qualified - broader evidence is absent"
+    scout = FakeScout([json.dumps(payload)])
+    service = ScoutAnalysisService(
+        connection, SQLiteRepositories.for_connection(connection), scout, settings
+    )
+
+    result = asyncio.run(service.analyze("work", AnalysisType.DEEP_DIVE))
+
+    assert result.status is AnalysisStatus.SUCCEEDED and scout.calls == 1
+    assert isinstance(result.output, DeepDiveReport)
+    assert result.output.skeptic_findings[0].resolution == "qualified"
 
 
 def test_second_invalid_response_is_stored_as_safe_failure(

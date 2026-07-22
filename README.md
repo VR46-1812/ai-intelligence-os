@@ -21,3 +21,17 @@ Phase one is a modular monolith, not a distributed platform. It uses Python, Fas
 ## Final mission
 
 Deliver a trustworthy daily AI intelligence workspace that discovers new developments, filters noise, produces evidence-backed technical deep dives, relates research to code and business opportunities, and teaches the user enough to build production systems from the knowledge.
+
+## V1 operator commands
+
+From `D:\Rujay\ai-intelligence-os`:
+
+```powershell
+.\scripts\start.ps1
+.\scripts\run-daily.ps1
+.\scripts\release-verify.ps1
+```
+
+Open `http://127.0.0.1:5173`. Stop workspace-managed services with
+`.\scripts\stop.ps1`. See `docs/V1_RELEASE.md` for backup, restore, failure
+recovery, acceptance evidence, and the release checklist.

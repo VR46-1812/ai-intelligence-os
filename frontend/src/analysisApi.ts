@@ -110,6 +110,30 @@ export interface TodayReport {
   readonly remaining_deep_dives: number;
 }
 
+export interface RankedDailyItem {
+  readonly work_id: string;
+  readonly title: string;
+  readonly score: number;
+  readonly reason: string;
+  readonly status: string;
+}
+
+export interface DailyIntelligenceReport {
+  readonly schema_version: "1.0";
+  readonly report_date: string;
+  readonly pipeline: {
+    readonly discovered: number; readonly normalized: number; readonly filtered: number;
+    readonly shortlisted: number; readonly briefed: number; readonly analyzed: number;
+    readonly failed: number; readonly run_id: string;
+  };
+  readonly top_technical: readonly RankedDailyItem[];
+  readonly top_commercial: readonly RankedDailyItem[];
+  readonly deep_dives: readonly string[];
+  readonly important_updates: readonly Record<string, string>[];
+  readonly learning_focus: readonly string[];
+  readonly coverage_gaps: readonly string[];
+}
+
 export class AnalysisApiError extends Error {
   constructor(message = "Local Scout analysis is unavailable.") {
     super(message);
@@ -176,6 +200,18 @@ export async function fetchToday(fetcher: typeof fetch, base: string, signal: Ab
   const payload = await json(await fetcher(`${base}/reports/today`, { signal, headers: { Accept: "application/json" } }));
   if (!isToday(payload)) throw new AnalysisApiError("Today's report response was invalid.");
   return payload;
+}
+
+export async function fetchCompleteDailyReport(fetcher: typeof fetch, base: string, signal: AbortSignal): Promise<DailyIntelligenceReport> {
+  const value = await json(await fetcher(`${base}/reports/daily/complete`, { signal, headers: { Accept: "application/json" } }));
+  if (!isRecord(value) || value.schema_version !== "1.0" || typeof value.report_date !== "string" ||
+      !isRecord(value.pipeline) || typeof value.pipeline.run_id !== "string" ||
+      !Array.isArray(value.top_technical) || !Array.isArray(value.top_commercial) ||
+      !Array.isArray(value.deep_dives) || !value.deep_dives.every((id) => typeof id === "string") ||
+      !Array.isArray(value.learning_focus) || !Array.isArray(value.coverage_gaps)) {
+    throw new AnalysisApiError("The final daily report response was invalid.");
+  }
+  return value as unknown as DailyIntelligenceReport;
 }
 
 export async function fetchModelStatus(fetcher: typeof fetch, base: string, signal: AbortSignal): Promise<ModelStatus> {

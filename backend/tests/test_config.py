@@ -131,6 +131,19 @@ def test_daily_work_limits_accept_valid_environment_overrides(
 
 
 @pytest.mark.parametrize(
+    "environment_name",
+    ["AIOS_SCHEDULER__MAXIMUM_RECORDS", "AIOS_SCHEDULER__DOCUMENT_LIMIT"],
+)
+def test_v1_daily_source_and_document_bounds_cannot_exceed_five(
+    monkeypatch: pytest.MonkeyPatch, environment_name: str
+) -> None:
+    monkeypatch.setenv(environment_name, "6")
+
+    with pytest.raises(ConfigurationError, match=environment_name.split("__")[-1].casefold()):
+        load_settings()
+
+
+@pytest.mark.parametrize(
     ("environment_name", "invalid_value", "expected_field"),
     [
         ("AIOS_DAILY_WORK__MAXIMUM_FAST_BRIEFS", "0", "maximum_fast_briefs"),

@@ -28,9 +28,28 @@ function deepDive(workId: string) {
 test("Today shows local model state and a citation-verified brief", async ({ page }) => {
   await page.route("**/models/scout/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(model) }));
   await page.route("**/reports/today", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ report_date: "2026-07-21", model, ranked: [{ work_id: "work-1", title: "Bounded Agents", technical_score: 78.4, brief: { ...deepDive("work-1"), analysis_type: "fast_brief", output: { schema_version: "1.0", work_id: "work-1", change: "A bounded method was evaluated.", problem: "Reliability", contribution: "A bounded method", evidence_state: "moderate", limitations: [], code_state: "unknown", technical_relevance: "Relevant", commercial_relevance: "Unverified", recommended_action: "read_source", claims: [{ text: "A method was evaluated.", type: "fact", evidence_ids: ["evidence-00000001"] }] } } }], generated_count: 1, remaining_fast_briefs: 9, remaining_deep_dives: 2 }) }));
+  await page.route("**/reports/daily/complete", (route) => route.fulfill({ json: {
+    schema_version: "1.0", report_date: "2026-07-21",
+    pipeline: { discovered: 5, normalized: 5, filtered: 5, shortlisted: 5, briefed: 1, analyzed: 2, failed: 0, run_id: "daily-1" },
+    top_technical: [], top_commercial: [], deep_dives: ["analysis-deep-1"],
+    important_updates: [], learning_focus: ["Citation verification"], coverage_gaps: [],
+  } }));
   await page.goto("/#today");
   await expect(page.getByText("Scout · qwen3:4b")).toBeVisible();
   await expect(page.getByText("100% citation coverage")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Published intelligence" })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open verified deep dive/ })).toBeVisible();
+});
+
+test("Today shows a clear empty state before the first final report", async ({ page }) => {
+  await page.route("**/reports/today", (route) => route.fulfill({ json: {
+    report_date: "2026-07-21", model, ranked: [], generated_count: 0,
+    remaining_fast_briefs: 10, remaining_deep_dives: 2,
+  } }));
+  await page.route("**/reports/daily/complete", (route) => route.fulfill({ status: 409, json: { detail: "Run the daily pipeline first." } }));
+  await page.goto("/#today");
+  await expect(page.getByRole("heading", { name: "No final daily report yet" })).toBeVisible();
+  await expect(page.getByText("Run the daily pipeline first.")).toBeVisible();
 });
 
 test("Explore deep-dive action opens a verified report with citations", async ({ page }) => {

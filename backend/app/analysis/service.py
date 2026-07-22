@@ -284,7 +284,7 @@ class ScoutAnalysisService:
             profile=profile,
         )
         try:
-            report = model_type.model_validate_json(first.response_text)
+            report = self._validate_response(model_type, first.response_text)
             self._validate_output_quality(report, work)
             self._verify_report(report, work)
             return report
@@ -293,13 +293,25 @@ class ScoutAnalysisService:
             CitationVerificationError,
             OutputQualityError,
             json.JSONDecodeError,
-        ):
+        ) as validation_error:
+            if isinstance(validation_error, ValidationError):
+                error_summary = json.dumps(
+                    validation_error.errors(
+                        include_url=False, include_context=False, include_input=False
+                    ),
+                    separators=(",", ":"),
+                )[:2000]
+            else:
+                error_summary = str(validation_error)[:2000]
             repair_prompt = (
                 prompt
                 + "\nThe prior JSON failed schema or citation verification. Correct it once. "
                 + "Remove every unsupported claim and use only supplied evidence IDs."
                 + " Every required field must be specific and non-repetitive. "
                 + "Narrative fields must be different from the title."
+                + " Every claim must contain the exact required claim keys."
+                + "\nVALIDATION_ERRORS:\n"
+                + error_summary
                 + "\nPRIOR_JSON:\n"
                 + first.response_text[:12_000]
             )
@@ -308,10 +320,91 @@ class ScoutAnalysisService:
                 schema=cast(dict[str, object], model_type.model_json_schema()),
                 profile=profile,
             )
-            report = model_type.model_validate_json(repaired.response_text)
+            report = self._validate_response(model_type, repaired.response_text)
             self._validate_output_quality(report, work)
             self._verify_report(report, work)
             return report
+
+    @staticmethod
+    def _validate_response(
+        model_type: type[FastBrief] | type[DeepDiveReport], response_text: str
+    ) -> FastBrief | DeepDiveReport:
+        raw_payload: object = json.loads(response_text)
+        if not isinstance(raw_payload, dict):
+            raise ValueError("structured output must be an object")
+        payload = cast(JsonObject, raw_payload)
+
+        def normalize(container: JsonObject | None, key: str, allowed: tuple[str, ...]) -> None:
+            if container is None or not isinstance(container.get(key), str):
+                return
+            value = str(container[key]).strip().casefold()
+            for option in allowed:
+                if value == option or any(
+                    value.startswith(option + suffix) for suffix in (" ", ":", " -")
+                ):
+                    container[key] = option
+                    return
+
+        if model_type is FastBrief:
+            normalize(payload, "evidence_state", ("strong", "moderate", "weak", "unknown"))
+            normalize(
+                payload,
+                "code_state",
+                ("official", "author_linked", "community", "none_found", "unknown"),
+            )
+            normalize(
+                payload,
+                "recommended_action",
+                ("deep_dive", "track", "read_source", "ignore", "manual_review"),
+            )
+            return FastBrief.model_validate(payload)
+        normalize(
+            payload,
+            "publication_status",
+            ("unknown", "preprint", "submitted", "accepted", "published", "withdrawn"),
+        )
+        raw_reproducibility = payload.get("reproducibility")
+        reproducibility = (
+            cast(JsonObject, raw_reproducibility) if isinstance(raw_reproducibility, dict) else None
+        )
+        normalize(
+            reproducibility,
+            "status",
+            ("unknown", "insufficient", "partial", "promising", "reproduced"),
+        )
+        normalize(
+            reproducibility,
+            "hardware_fit",
+            ("fits", "fits_with_reduction", "does_not_fit", "unknown"),
+        )
+        raw_findings = payload.get("skeptic_findings")
+        if isinstance(raw_findings, list):
+            for raw_finding in raw_findings:
+                if isinstance(raw_finding, dict):
+                    finding = cast(JsonObject, raw_finding)
+                    normalize(finding, "severity", ("info", "warning", "critical"))
+                    normalize(
+                        finding,
+                        "resolution",
+                        ("accepted", "qualified", "rejected", "unresolved"),
+                    )
+        raw_claims = payload.get("claims")
+        if isinstance(raw_claims, list):
+            for raw_claim in raw_claims:
+                if isinstance(raw_claim, dict):
+                    claim = cast(JsonObject, raw_claim)
+                    normalize(
+                        claim,
+                        "type",
+                        ("fact", "interpretation", "recommendation", "hypothesis"),
+                    )
+                    normalize(claim, "importance", ("minor", "major", "critical"))
+                    normalize(
+                        claim,
+                        "verification_status",
+                        ("unsupported", "supported", "conflicted", "rejected"),
+                    )
+        return DeepDiveReport.model_validate(payload)
 
     @staticmethod
     def _validate_output_quality(report: FastBrief | DeepDiveReport, work: WorkInput) -> None:

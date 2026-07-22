@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -10,12 +11,39 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import NoReturn
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
 from app.config import initialize_directories, load_settings
 from app.db.connection import SQLiteDatabase
 
 
 class BackupError(RuntimeError):
     """Raised when a consistent local SQLite backup cannot be created."""
+
+
+class BackupManifest(BaseModel):
+    """Integrity metadata required before a local restore is accepted."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: str = Field(pattern=r"^1\.0$")
+    database_file: str
+    byte_size: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    migration_versions: tuple[int, ...]
+    created_at: str
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def manifest_path(database_backup: Path) -> Path:
+    return database_backup.with_suffix(database_backup.suffix + ".manifest.json")
 
 
 def backup_database(
@@ -72,9 +100,107 @@ def backup_database(
             raise BackupError(f"Backup destination appeared during backup: {destination}")
         os.replace(temporary_path, destination)
         temporary_path = None
+        verification = sqlite3.connect(destination)
+        try:
+            versions = tuple(
+                int(row[0])
+                for row in verification.execute(
+                    "SELECT version FROM schema_migrations ORDER BY version"
+                ).fetchall()
+            )
+        finally:
+            verification.close()
+        manifest = BackupManifest(
+            schema_version="1.0",
+            database_file=destination.name,
+            byte_size=destination.stat().st_size,
+            sha256=_sha256(destination),
+            migration_versions=versions,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        manifest_destination = manifest_path(destination)
+        manifest_temporary = manifest_destination.with_suffix(manifest_destination.suffix + ".tmp")
+        manifest_temporary.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(manifest_temporary, manifest_destination)
         return destination
     except (OSError, sqlite3.Error) as error:
         raise BackupError(f"Could not create SQLite backup at {destination}: {error}") from error
+    finally:
+        if target is not None:
+            target.close()
+        if source is not None:
+            source.close()
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def restore_database(
+    backup_path: Path,
+    destination: Path,
+    allowed_root: Path,
+    *,
+    overwrite: bool = False,
+) -> Path:
+    """Validate a backup manifest and atomically restore a SQLite database."""
+    allowed_root = allowed_root.resolve(strict=False)
+    backup_path = backup_path.resolve(strict=False)
+    destination = destination.resolve(strict=False)
+    if not backup_path.is_relative_to(allowed_root) or not destination.is_relative_to(allowed_root):
+        raise BackupError(f"Backup and restore paths must remain inside {allowed_root}")
+    if not backup_path.is_file():
+        raise BackupError(f"SQLite backup does not exist: {backup_path}")
+    if destination == backup_path:
+        raise BackupError("Restore destination cannot replace the backup")
+    if destination.exists() and not overwrite:
+        raise BackupError(f"Restore destination already exists: {destination}")
+    metadata_path = manifest_path(backup_path)
+    try:
+        manifest = BackupManifest.model_validate_json(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValidationError, ValueError) as error:
+        raise BackupError("Backup manifest is missing or invalid") from error
+    if (
+        manifest.database_file != backup_path.name
+        or manifest.byte_size != backup_path.stat().st_size
+        or manifest.sha256 != _sha256(backup_path)
+    ):
+        raise BackupError("Backup does not match its integrity manifest")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    source: sqlite3.Connection | None = None
+    target: sqlite3.Connection | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{destination.stem}-restore-",
+            suffix=".tmp",
+            dir=destination.parent,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+        source = sqlite3.connect(f"file:{backup_path.as_posix()}?mode=ro", uri=True)
+        target = sqlite3.connect(temporary_path)
+        source.backup(target)
+        integrity = target.execute("PRAGMA integrity_check").fetchone()
+        versions = tuple(
+            int(row[0])
+            for row in target.execute(
+                "SELECT version FROM schema_migrations ORDER BY version"
+            ).fetchall()
+        )
+        if integrity is None or str(integrity[0]).casefold() != "ok":
+            raise BackupError("Restored SQLite database failed its integrity check")
+        if versions != manifest.migration_versions:
+            raise BackupError("Restored migration history does not match the backup manifest")
+        target.close()
+        target = None
+        source.close()
+        source = None
+        if destination.exists() and not overwrite:
+            raise BackupError(f"Restore destination appeared during restore: {destination}")
+        os.replace(temporary_path, destination)
+        temporary_path = None
+        return destination
+    except (OSError, sqlite3.Error) as error:
+        raise BackupError(f"Could not restore SQLite backup: {error}") from error
     finally:
         if target is not None:
             target.close()
@@ -102,11 +228,39 @@ def main() -> None:
         help="Backup path under the configured data root.",
     )
     parser.add_argument("--overwrite", action="store_true", help="Replace an existing backup file.")
+    parser.add_argument(
+        "--restore-from",
+        type=Path,
+        help="Restore a manifest-verified backup instead of creating one.",
+    )
     arguments = parser.parse_args()
 
     settings = load_settings()
     initialize_directories(settings.paths)
     source_path = settings.paths.database_path
+    if arguments.restore_from is not None:
+        restore_source = (
+            arguments.restore_from
+            if arguments.restore_from.is_absolute()
+            else settings.paths.data_root / arguments.restore_from
+        )
+        restore_destination = arguments.destination or source_path
+        restore_destination = (
+            restore_destination
+            if restore_destination.is_absolute()
+            else settings.paths.data_root / restore_destination
+        )
+        try:
+            completed = restore_database(
+                restore_source,
+                restore_destination,
+                settings.paths.data_root,
+                overwrite=arguments.overwrite,
+            )
+        except BackupError as error:
+            _fail(str(error))
+        print(completed)
+        return
     if not source_path.is_file():
         _fail(f"Configured SQLite database does not exist: {source_path}")
 

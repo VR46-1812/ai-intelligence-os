@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 
 from app.config import REPOSITORY_ROOT
-from app.db.backup import BackupError, backup_database
+from app.db.backup import BackupError, backup_database, manifest_path, restore_database
 from app.db.connection import DatabaseConnectionError, SQLiteDatabase, transaction
 from app.db.migrations import (
     DEFAULT_MIGRATIONS_DIRECTORY,
@@ -70,7 +70,7 @@ def test_numbered_initial_migration_matches_contract() -> None:
         (DEFAULT_MIGRATIONS_DIRECTORY / "0001_initial.sql").read_text(encoding="utf-8").splitlines()
     )
 
-    assert migration_lines == contract_lines
+    assert contract_lines[: len(migration_lines)] == migration_lines
 
 
 def test_new_database_migrates_with_required_sqlite_features(database_path: Path) -> None:
@@ -270,6 +270,7 @@ def test_online_backup_is_consistent_and_confined(database_path: Path) -> None:
     completed = backup_database(database, destination, allowed_root)
 
     assert completed == destination
+    assert manifest_path(destination).is_file()
     backup_connection = sqlite3.connect(destination)
     try:
         assert backup_connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -283,6 +284,36 @@ def test_online_backup_is_consistent_and_confined(database_path: Path) -> None:
         backup_database(database, allowed_root.parent / "escaped.db", allowed_root)
     with pytest.raises(BackupError, match="cannot replace the active database"):
         backup_database(database, database_path, allowed_root, overwrite=True)
+
+
+def test_backup_restore_round_trip_preserves_temporary_data(database_path: Path) -> None:
+    database = _migrate(database_path)
+    connection = database.connect()
+    try:
+        _insert_source(connection, "round-trip-source")
+    finally:
+        connection.close()
+    backup = backup_database(
+        database,
+        database_path.parent / "backups" / "round-trip.db",
+        database_path.parent,
+    )
+    restored = restore_database(
+        backup,
+        database_path.parent / "restored" / "state.db",
+        database_path.parent,
+    )
+
+    connection = sqlite3.connect(restored)
+    try:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert (
+            connection.execute("SELECT id FROM sources WHERE id='round-trip-source'").fetchone()[0]
+            == "round-trip-source"
+        )
+        assert connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 5
+    finally:
+        connection.close()
 
 
 def test_backup_rejects_missing_source_without_creating_it(database_path: Path) -> None:

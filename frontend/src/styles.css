@@ -26,6 +26,10 @@
 .stage-row span { border: 1px solid var(--border); border-radius: 99px; padding: 5px 8px; font-size: .7rem; text-transform: capitalize; }
 .stage-row .succeeded { color: var(--cyan); border-color: rgba(48, 210, 190, .3); }
 .stage-row .failed, .stage-row .rejected { color: #ff938c; border-color: rgba(255, 113, 104, .35); }
+.daily-output-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 18px; }
+.deep-link-list { display: grid; gap: 8px; margin-top: 14px; }
+.deep-link-list a { color: var(--cyan); text-decoration: none; }
+.coverage-warning { margin-top: 14px; border-left: 2px solid #ffb15c; padding-left: 12px; color: var(--muted); }
 
 * {
   box-sizing: border-box;

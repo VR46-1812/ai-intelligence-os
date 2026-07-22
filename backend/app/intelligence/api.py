@@ -8,11 +8,12 @@ from fastapi import APIRouter, HTTPException, Path, Request
 
 from app.analysis.api import analysis_service
 from app.analysis.service import AnalysisServiceError
-from app.intelligence.evaluation import evaluate_golden_set
+from app.intelligence.evaluation import evaluate_golden_set, load_human_review_set
 from app.intelligence.models import (
     DailyIntelligenceReport,
     DeepDiveProgress,
     EvaluationScores,
+    HumanReviewSet,
     ModelRankingSignal,
     Opportunity,
     TopicOverview,
@@ -53,7 +54,7 @@ async def analysis_progress(analysis_id: EntityId, request: Request) -> DeepDive
 async def complete_daily_report(request: Request) -> DailyIntelligenceReport:
     try:
         async with analysis_service(request) as scout:
-            return IntelligenceOutputService(scout.connection, scout).assemble_daily_report()
+            return IntelligenceOutputService(scout.connection, scout).latest_daily_report()
     except AnalysisServiceError as error:
         raise HTTPException(error.status_code, error.safe_detail) from error
 
@@ -73,3 +74,8 @@ async def opportunities(request: Request) -> tuple[Opportunity, ...]:
 @router.get("/evaluations/golden/v1", response_model=EvaluationScores)
 async def golden_evaluation() -> EvaluationScores:
     return evaluate_golden_set()
+
+
+@router.get("/evaluations/human-review/v1", response_model=HumanReviewSet)
+async def human_review_cases() -> HumanReviewSet:
+    return load_human_review_set()

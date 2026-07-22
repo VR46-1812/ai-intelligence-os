@@ -8,7 +8,7 @@ from collections.abc import Sequence
 
 from app.config import initialize_directories, load_settings
 from app.db import MigrationRunner, SQLiteDatabase
-from app.domain.models import PipelineTriggerType
+from app.domain.models import PipelineStatus, PipelineTriggerType
 from app.operations.service import ProductionDailyRunner
 
 
@@ -36,7 +36,10 @@ def main(arguments: Sequence[str] | None = None) -> None:
     options = parser.parse_args(arguments)
     runner = _runner()
     if options.command == "run-now":
-        print(asyncio.run(runner.run(PipelineTriggerType.MANUAL)).model_dump_json(indent=2))
+        result = asyncio.run(runner.run(PipelineTriggerType.MANUAL))
+        print(result.model_dump_json(indent=2))
+        if result.status is not PipelineStatus.SUCCEEDED:
+            raise SystemExit(1)
     elif options.command == "status":
         print(runner.status().model_dump_json(indent=2))
     else:

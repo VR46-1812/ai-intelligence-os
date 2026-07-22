@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchAnalysis, fetchAnalysisProgress, fetchModelStatus, fetchToday, generateAnalysis, retryAnalysis } from "./analysisApi";
+import { fetchAnalysis, fetchAnalysisProgress, fetchCompleteDailyReport, fetchModelStatus, fetchToday, generateAnalysis, retryAnalysis } from "./analysisApi";
 
 const model = {
   runtime: "ollama",
@@ -72,5 +72,16 @@ describe("local analysis API", () => {
     }));
     const progress = await fetchAnalysisProgress(fetcher, "/api", "analysis-1", new AbortController().signal);
     expect(progress.stages[0]?.key).toBe("publish");
+  });
+
+  it("reads the final persisted daily report", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({
+      schema_version: "1.0", report_date: "2026-07-21",
+      pipeline: { discovered: 5, normalized: 0, filtered: 5, shortlisted: 5, briefed: 1, analyzed: 2, failed: 0, run_id: "daily" },
+      top_technical: [], top_commercial: [], deep_dives: ["deep-1", "deep-2"],
+      important_updates: [], learning_focus: ["citations"], coverage_gaps: [],
+    }));
+    await expect(fetchCompleteDailyReport(fetcher, "/api", new AbortController().signal))
+      .resolves.toMatchObject({ deep_dives: ["deep-1", "deep-2"] });
   });
 });

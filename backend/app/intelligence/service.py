@@ -79,6 +79,54 @@ class IntelligenceOutputService:
                 results.append(signal)
         return tuple(results)
 
+    def deep_dive_candidates(self, limit: int) -> tuple[str, ...]:
+        if not 1 <= limit <= 3:
+            raise ValueError("deep-dive candidate limit must be between 1 and 3")
+        day_start = f"{datetime.now(UTC).date().isoformat()}T00:00:00"
+        selected: list[str] = []
+
+        def add(rows: list[sqlite3.Row]) -> None:
+            for row in rows:
+                work_id = str(row[0])
+                if work_id not in selected and len(selected) < limit:
+                    selected.append(work_id)
+
+        add(
+            self._connection.execute(
+                """SELECT a.work_id FROM analysis_runs a
+                WHERE a.analysis_type='deep_dive' AND a.status='succeeded'
+                  AND a.created_at>=?
+                ORDER BY a.completed_at DESC,a.id DESC LIMIT ?""",
+                (day_start, limit),
+            ).fetchall()
+        )
+        add(
+            self._connection.execute(
+                """SELECT j.work_id FROM deep_dive_jobs j
+                JOIN ranking_profiles rp ON rp.active=1
+                JOIN ranking_results rr ON rr.profile_id=rp.id AND rr.work_id=j.work_id
+                  AND rr.score_kind='deep_dive_priority'
+                WHERE j.status IN ('failed','rejected')
+                ORDER BY rr.total_score DESC,j.updated_at,j.id LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        )
+        add(
+            self._connection.execute(
+                """SELECT rr.work_id FROM ranking_results rr
+            JOIN ranking_profiles rp ON rp.id=rr.profile_id AND rp.active=1
+            JOIN works w ON w.id=rr.work_id
+            JOIN work_versions v ON v.id=w.current_version_id
+            WHERE rr.score_kind='deep_dive_priority'
+              AND EXISTS (SELECT 1 FROM documents d JOIN evidence_spans e
+                ON e.document_id=d.id WHERE d.work_version_id=v.id
+                AND d.parse_status IN ('parsed','partial'))
+            ORDER BY rr.total_score DESC,rr.work_id LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        )
+        return tuple(selected)
+
     @staticmethod
     def _signal_from_brief(work_id: str, raw: object) -> ModelRankingSignal:
         neutral = ModelRankingSignal(
@@ -335,7 +383,9 @@ class IntelligenceOutputService:
             """SELECT a.id FROM analysis_runs a WHERE a.analysis_type='deep_dive'
             AND a.status='succeeded' ORDER BY a.completed_at DESC LIMIT 2"""
         ).fetchall()
-        analyzed = len(deep_rows)
+        analyzed = int(counts_raw.get("deep_dives_generated", 0)) + int(
+            counts_raw.get("deep_dives_cached", 0)
+        )
         failed = int(counts_raw.get("documents_failed", 0))
         report = DailyIntelligenceReport(
             schema_version="1.0",
@@ -371,6 +421,23 @@ class IntelligenceOutputService:
                 (report.report_date, "1.0", run["id"], fingerprint, payload, now, now),
             )
         return report
+
+    def latest_daily_report(self) -> DailyIntelligenceReport:
+        row = self._connection.execute(
+            "SELECT report_json FROM daily_reports ORDER BY report_date DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            raise AnalysisServiceError(
+                "DAILY_RUN_REQUIRED", "Run the daily pipeline first.", status_code=409
+            )
+        try:
+            return DailyIntelligenceReport.model_validate_json(str(row[0]))
+        except ValueError as error:
+            raise AnalysisServiceError(
+                "DAILY_REPORT_INVALID",
+                "The stored daily report is invalid. Run the daily pipeline again.",
+                status_code=409,
+            ) from error
 
     def _ranked(
         self, kind: str, signals: dict[str, ModelRankingSignal]
