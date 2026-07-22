@@ -153,6 +153,13 @@ function PaperDetail({ apiBaseUrl, paper, state, onClose, evidence, evidenceStat
               )) : <span className="muted-copy">No topic assignment</span>}
             </div>
           </section>
+          <section aria-labelledby="linked-sources-heading">
+            <p className="eyebrow" id="linked-sources-heading">Linked-source evidence</p>
+            {paper.linked_sources.length ? <div className="linked-source-list">{paper.linked_sources.map((source) => {
+              const url = safeExternalUrl(source.canonical_url);
+              return <article key={source.artifact_id}><div><strong>{source.source_key}</strong><span>{source.relationship.replaceAll("_", " ")}</span><span>{source.content_class.replaceAll("_", " ")}</span></div><p>{source.title}</p>{url && <a href={url} target="_blank" rel="noreferrer noopener">Open verified source ↗</a>}</article>;
+            })}</div> : <p className="muted-copy">No corroborating source has been linked yet.</p>}
+          </section>
           <section className="ranking-panel" aria-labelledby="detail-ranking-heading">
             <p className="eyebrow" id="detail-ranking-heading">Deterministic ranking</p>
             <div className="score-grid">
@@ -485,6 +492,7 @@ export function ExplorePage({ apiBaseUrl, initialPaperId }: ExplorePageProps) {
                       <span><b>{score(paper.ranking.commercial)}</b> commercial</span>
                       <span><b>{paper.evidence_count}</b> evidence spans</span>
                     </div>
+                    {paper.linked_sources.length > 0 && <div className="source-link-row">{paper.linked_sources.slice(0, 4).map((source) => <span key={source.artifact_id}>{source.source_key} · {source.relationship.replaceAll("_", " ")}</span>)}</div>}
                     {paper.match_reason && <p className="match-reason">Matched by {paper.match_reason}</p>}
                   </article>
                 );

@@ -4,7 +4,8 @@ import { fetchDailyStatus, fetchSystemStatus, runDailyNow } from "./operationsAp
 
 const counts = { fetched: 5, normalized: 4, documents_processed: 2, documents_failed: 0,
   evidence_spans: 20, works_ranked: 5, briefs_generated: 1, briefs_cached: 0,
-  deep_dives_generated: 2, deep_dives_cached: 0, files_cleaned: 1 };
+  deep_dives_generated: 2, deep_dives_cached: 0, files_cleaned: 1,
+  source_counts: { arxiv: 5, openreview: 2 } };
 const run = { run_id: "daily-1", status: "succeeded", trigger: "manual", counts,
   started_at: "2026-07-21T00:00:00Z", completed_at: "2026-07-21T00:02:00Z", safe_detail: null };
 const daily = { scheduler_enabled: true, schedule: "06:00 Asia/Kolkata", running: false,

@@ -35,3 +35,8 @@ From `D:\Rujay\ai-intelligence-os`:
 Open `http://127.0.0.1:5173`. Stop workspace-managed services with
 `.\scripts\stop.ps1`. See `docs/V1_RELEASE.md` for backup, restore, failure
 recovery, acceptance evidence, and the release checklist.
+
+V1.1 adds registry-driven OpenReview, GitHub enrichment, Hugging Face Hub, and
+allowlisted official RSS/Atom discovery. The same `run-daily.ps1` command runs
+the bounded multi-source pipeline. See `docs/V1_1_RELEASE.md` for source trust,
+checkpoints, linked-event behavior, and operator troubleshooting.

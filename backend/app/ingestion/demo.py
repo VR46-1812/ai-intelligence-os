@@ -44,6 +44,7 @@ def ensure_useful_live_result(result: ArxivSyncResult) -> None:
 
 
 class OfflineFixtureConnector:
+    contract_version = "1.0"
     key = "fixture"
     trust_tier = TrustTier.A
     connector_version = "fixture-v1"

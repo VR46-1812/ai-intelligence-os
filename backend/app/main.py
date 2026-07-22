@@ -18,12 +18,13 @@ from app.discovery.api import public_router as public_discovery_router
 from app.discovery.api import router as discovery_router
 from app.documents.api import router as documents_router
 from app.intelligence.api import router as intelligence_router
+from app.multisource.api import router as multisource_router
 from app.operations.api import router as operations_router
 from app.operations.scheduler import DailyScheduler
 from app.operations.service import ProductionDailyRunner
 from app.ranking.api import router as ranking_router
 from app.repositories import SQLiteRepositories
-from app.sources.catalog import upsert_arxiv_source
+from app.sources.catalog import upsert_arxiv_source, upsert_multisource_registry
 
 
 class HealthStatus(StrEnum):
@@ -79,6 +80,11 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
                     resolved_settings.sources,
                     now=datetime.now(UTC),
                 )
+                upsert_multisource_registry(
+                    repositories.sources,
+                    resolved_settings.sources,
+                    now=datetime.now(UTC),
+                )
         finally:
             connection.close()
         await daily_scheduler.start()
@@ -115,6 +121,7 @@ def create_app(settings: AppSettings | None = None) -> FastAPI:
     application.include_router(analysis_router)
     application.include_router(intelligence_router)
     application.include_router(operations_router)
+    application.include_router(multisource_router)
 
     return application
 

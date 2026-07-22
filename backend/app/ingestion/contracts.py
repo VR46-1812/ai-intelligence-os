@@ -133,6 +133,7 @@ class HttpResponse(ConnectorModel):
 
 
 class SourceConnector(Protocol):
+    contract_version: str
     key: str
     trust_tier: TrustTier
     connector_version: str

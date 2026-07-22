@@ -45,6 +45,7 @@ ID_SEQUENCE = count(1)
 
 
 class FixtureConnector:
+    contract_version = "1.0"
     key = "fixture"
     trust_tier = TrustTier.A
     connector_version = "fixture-v1"

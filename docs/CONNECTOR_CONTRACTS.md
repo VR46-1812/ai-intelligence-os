@@ -242,7 +242,10 @@ GitHub is called only for repository URLs linked by canonical paper metadata, au
 
 ## 9. Future connector definitions
 
-Define adapters later for Hugging Face, OpenAlex, Semantic Scholar, Crossref, and RSS. They must emit the same normalized contract; source-specific fields remain in `extra` until promoted through an explicit schema decision.
+V1.1 implements Hugging Face model/dataset/Space discovery and allowlisted
+official RSS/Atom feeds through this same versioned contract. OpenAlex,
+Semantic Scholar, and Crossref remain future adapters. Source-specific fields
+remain in `extra` until promoted through an explicit schema decision.
 
 ## 10. Contract test suite
 

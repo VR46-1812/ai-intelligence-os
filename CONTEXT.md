@@ -122,6 +122,11 @@ Phase one may define but must not fully implement:
 - Crossref.
 - Official research-lab RSS feeds.
 
+V1.1, explicitly approved on 2026-07-22, implements Hugging Face Hub and
+allowlisted official RSS/Atom discovery alongside OpenReview and GitHub
+enrichment. It retains the same connector contract, trust policy, local storage,
+and free public-access boundary. Social feeds remain excluded.
+
 General news and social media are discovery signals only and cannot establish technical facts.
 
 ## 8. Source trust policy
@@ -197,6 +202,9 @@ Phase-one target metrics:
 - 2026-07-17: lightweight modular monolith replaces the earlier heavy service stack.
 - 2026-07-17: SQLite/filesystem/sequential agents selected for phase one.
 - 2026-07-17: detailed reports are limited by ranking funnel rather than shallow processing of everything.
+- 2026-07-22: V1.1 multi-source scope approved for OpenReview, GitHub enrichment,
+  Hugging Face Hub, and allowlisted official RSS/Atom feeds; deterministic ranking
+  and primary-evidence precedence remain authoritative.
 
 ## 14. Change control
 

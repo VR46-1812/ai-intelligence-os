@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { ApiHealthState } from "./apiHealth";
 import { AnalysisApiError, fetchCompleteDailyReport, fetchToday, type DailyIntelligenceReport, type TodayReport } from "./analysisApi";
 import { fetchDailyStatus, OperationsApiError, runDailyNow, type DailyRunStatus } from "./operationsApi";
+import { fetchLinkedEvents, type LinkedEvent } from "./eventApi";
 
 interface TodayPageProps {
   readonly apiBaseUrl: string;
@@ -17,6 +18,8 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
   const [daily, setDaily] = useState<DailyRunStatus | null>(null);
   const [complete, setComplete] = useState<DailyIntelligenceReport | null>(null);
   const [completeError, setCompleteError] = useState<string | null>(null);
+  const [events, setEvents] = useState<readonly LinkedEvent[]>([]);
+  const [eventsError, setEventsError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -35,6 +38,9 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
       .catch((reason: unknown) => {
         if (!controller.signal.aborted) setCompleteError(reason instanceof AnalysisApiError ? reason.message : "No final daily report is available yet.");
       });
+    void fetchLinkedEvents(fetch, apiBaseUrl, controller.signal)
+      .then((value) => { setEvents(value.items); setEventsError(null); })
+      .catch(() => { if (!controller.signal.aborted) setEventsError("No linked-source events are available yet."); });
     return () => controller.abort();
   }, [apiBaseUrl]);
 
@@ -56,6 +62,7 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
       setReport(nextReport);
       setDaily(nextStatus);
       setComplete(await fetchCompleteDailyReport(fetch, apiBaseUrl, controller.signal));
+      setEvents((await fetchLinkedEvents(fetch, apiBaseUrl, controller.signal)).items);
       setCompleteError(null);
       setState("ready");
     } catch (reason) {
@@ -108,6 +115,16 @@ export function TodayPage({ apiBaseUrl, healthState, healthLabel }: TodayPagePro
           <section className="section-block" aria-labelledby="daily-report-heading">
             <div className="section-heading"><div><p className="eyebrow">Final daily report</p><h2 id="daily-report-heading">Published intelligence</h2></div>{complete && <span className="phase-badge">{complete.report_date}</span>}</div>
             {complete ? <div className="daily-output-grid"><article className="intelligence-card"><h3>Pipeline</h3><p>{complete.pipeline.discovered} discovered · {complete.pipeline.filtered} ranked · {complete.pipeline.briefed} briefed · {complete.pipeline.analyzed} analyzed · {complete.pipeline.failed} failed</p>{complete.deep_dives.length ? <div className="deep-link-list">{complete.deep_dives.map((id) => <a key={id} href={`#report/${encodeURIComponent(id)}`}>Open verified deep dive {id.slice(-8)} →</a>)}</div> : <p className="muted-copy">No verified deep dive was published in this report.</p>}</article><article className="intelligence-card"><h3>Learning focus</h3>{complete.learning_focus.length ? <ul>{complete.learning_focus.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted-copy">No learning focus was extracted.</p>}{complete.coverage_gaps.length > 0 && <div className="coverage-warning"><strong>Coverage gaps</strong>{complete.coverage_gaps.map((gap) => <p key={gap}>{gap}</p>)}</div>}</article></div> : <div className="state-panel"><h3>No final daily report yet</h3><p>{completeError ?? "Run the bounded local pipeline to publish today’s report."}</p></div>}
+          </section>
+          <section className="section-block" aria-labelledby="intelligence-sections-heading">
+            <div className="section-heading"><div><p className="eyebrow">Multi-source synthesis</p><h2 id="intelligence-sections-heading">From change to action</h2></div><span className="phase-badge">{events.length} linked events</span></div>
+            <div className="intelligence-lens-grid">
+              <article><h3>What happened</h3>{events.length ? events.slice(0, 5).map((event) => <p key={event.id}><a href={event.primary_work_id ? `#explore/${encodeURIComponent(event.primary_work_id)}` : "#explore"}>{event.title}</a><span>{event.sources.map((source) => source.source_key).join(" + ")} · {Math.round(event.corroboration * 100)}% corroboration</span></p>) : <p className="muted-copy">{eventsError ?? "Run discovery to build linked developments."}</p>}</article>
+              <article><h3>Why it matters</h3>{complete?.top_technical.length ? complete.top_technical.slice(0, 3).map((item) => <p key={item.work_id}><strong>{item.title}</strong><span>{item.reason}</span></p>) : <p className="muted-copy">No ranked technical development is published yet.</p>}</article>
+              <article><h3>What to learn</h3>{complete?.learning_focus.length ? complete.learning_focus.map((item) => <p key={item}>{item}</p>) : <p className="muted-copy">No verified learning path is available yet.</p>}</article>
+              <article><h3>What to build</h3>{complete?.top_technical.length ? complete.top_technical.slice(0, 3).map((item) => <p key={item.work_id}><strong>{item.title}</strong><span>Interpretation · validate against linked primary evidence before implementation.</span></p>) : <p className="muted-copy">No evidence-backed build direction is available yet.</p>}</article>
+              <article><h3>Commercial opportunities</h3>{complete?.top_commercial.length ? complete.top_commercial.slice(0, 3).map((item) => <p key={item.work_id}><strong>{item.title}</strong><span>Commercial hypothesis · {item.reason}</span></p>) : <p className="muted-copy">No commercial hypothesis is published yet.</p>}</article>
+            </div>
           </section>
         </>
       )}

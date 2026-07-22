@@ -18,6 +18,9 @@ The executable baseline is in `contracts/schema.sql`. Use UTC ISO-8601 timestamp
 | `sources` | `source_records` | 1:N | raw upstream records |
 | `works` | `work_versions` | 1:N | stable identity and revisions |
 | `works` | `external_ids` | 1:N | DOI/arXiv/OpenReview identifiers |
+| `source_records` | `source_artifacts` | 1:0..1 | normalized V1.1 source artifact with provenance |
+| `works` | `linked_events` | 1:N | canonical cross-source development/event |
+| `linked_events` | `source_artifacts` | N:M | typed evidence relationship and resolution basis |
 | `works` | `work_authors` | 1:N | ordered authorship |
 | `works` | `work_topics` | 1:N | controlled classifications |
 | `work_versions` | `documents` | 1:N | downloaded representations |

@@ -26,6 +26,7 @@ function deepDive(workId: string) {
 }
 
 test("Today shows local model state and a citation-verified brief", async ({ page }) => {
+  await page.route("**/events?**", (route) => route.fulfill({ json: { items: [{ id: "event-1", title: "Bounded Agents released", primary_work_id: "work-1", occurred_at: "2026-07-21T00:00:00Z", corroboration: 0.5, sources: [{ artifact_id: "repo-1", source_key: "github", artifact_type: "repository", title: "Official repository", canonical_url: "https://github.com/example/bounded-agents", relationship: "official_repository", content_class: "fact", authority: 0.85, freshness: 1, novelty: 1, published_at: null }] }], total: 1, limit: 20, offset: 0, has_more: false } }));
   await page.route("**/models/scout/status", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(model) }));
   await page.route("**/reports/today", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ report_date: "2026-07-21", model, ranked: [{ work_id: "work-1", title: "Bounded Agents", technical_score: 78.4, brief: { ...deepDive("work-1"), analysis_type: "fast_brief", output: { schema_version: "1.0", work_id: "work-1", change: "A bounded method was evaluated.", problem: "Reliability", contribution: "A bounded method", evidence_state: "moderate", limitations: [], code_state: "unknown", technical_relevance: "Relevant", commercial_relevance: "Unverified", recommended_action: "read_source", claims: [{ text: "A method was evaluated.", type: "fact", evidence_ids: ["evidence-00000001"] }] } } }], generated_count: 1, remaining_fast_briefs: 9, remaining_deep_dives: 2 }) }));
   await page.route("**/reports/daily/complete", (route) => route.fulfill({ json: {
@@ -39,6 +40,9 @@ test("Today shows local model state and a citation-verified brief", async ({ pag
   await expect(page.getByText("100% citation coverage")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Published intelligence" })).toBeVisible();
   await expect(page.getByRole("link", { name: /Open verified deep dive/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What happened" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Commercial opportunities" })).toBeVisible();
+  await expect(page.getByText("github · 50% corroboration")).toBeVisible();
 });
 
 test("Today shows a clear empty state before the first final report", async ({ page }) => {
@@ -60,6 +64,7 @@ test("Explore deep-dive action opens a verified report with citations", async ({
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(report) });
   });
   await page.route("**/analyses/analysis-deep-1", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(report) }));
+  await page.route("**/events?**", (route) => route.fulfill({ json: { items: [{ id: "event-1", title: "Linked report", primary_work_id: report.work_id, occurred_at: null, corroboration: 0.5, sources: [{ artifact_id: "model-1", source_key: "huggingface", artifact_type: "model", title: "Official model", canonical_url: "https://huggingface.co/example/model", relationship: "official_model", content_class: "fact", authority: 0.85, freshness: 1, novelty: 1, published_at: null }] }], total: 1, limit: 20, offset: 0, has_more: false } }));
   await page.goto("/#explore");
   await page.locator(".paper-title").first().click();
   await page.getByRole("button", { name: "Run deep dive" }).click();
@@ -67,4 +72,5 @@ test("Explore deep-dive action opens a verified report with citations", async ({
   await expect(page.getByRole("heading", { name: "Verified local research report" })).toBeVisible();
   await expect(page.getByText("100% citation coverage")).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Verified claims" })).toContainText("Evidence 00000001");
+  await expect(page.getByRole("complementary", { name: "Verified claims" })).toContainText("Linked-source evidence");
 });

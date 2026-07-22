@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 
 const counts = { fetched: 5, normalized: 5, documents_processed: 2, documents_failed: 0,
   evidence_spans: 42, works_ranked: 5, briefs_generated: 1, briefs_cached: 0,
-  deep_dives_generated: 2, deep_dives_cached: 0, files_cleaned: 1 };
+  deep_dives_generated: 2, deep_dives_cached: 0, files_cleaned: 1,
+  source_counts: { arxiv: 5, openreview: 2, huggingface: 3, "official-rss": 2 } };
 const run = { run_id: "daily-smoke", status: "succeeded", trigger: "manual", counts,
   started_at: "2026-07-21T00:00:00Z", completed_at: "2026-07-21T00:02:00Z", safe_detail: null };
 const daily = { scheduler_enabled: true, schedule: "06:00 Asia/Kolkata", running: false,

@@ -35,6 +35,7 @@ from app.domain.models import (
     PipelineTriggerType,
 )
 from app.intelligence.service import IntelligenceOutputService
+from app.multisource.service import MultiSourceDiscoveryService
 from app.operations.cleanup import RetentionCleaner
 from app.operations.models import CleanupResult, DailyCounts, DailyRunResult, DailyRunStatus
 from app.ranking.engine import DeterministicRankingEngine
@@ -188,6 +189,17 @@ class ProductionDailyRunner:
             ),
             trigger=trigger,
         )
+        multi_source = await MultiSourceDiscoveryService(
+            self._settings,
+            connection,
+            repositories,
+            id_factory=self._id_factory,
+            clock=self._clock,
+        ).sync(
+            maximum_records=self._settings.scheduler.maximum_records,
+            lookback_hours=self._settings.scheduler.lookback_hours,
+            trigger=trigger,
+        )
         timeout = httpx.Timeout(
             connect=self._settings.http.connect_timeout_seconds,
             read=self._settings.http.read_timeout_seconds,
@@ -241,12 +253,16 @@ class ProductionDailyRunner:
             id_factory=self._id_factory,
         ).rank_catalog(limit=100)
         base_counts = DailyCounts(
-            fetched=sync_result.ingestion.records_seen,
+            fetched=sync_result.ingestion.records_seen + multi_source.total_fetched,
             normalized=sync_result.records_normalized,
             documents_processed=documents.succeeded,
             documents_failed=documents.failed + documents.quarantined,
             evidence_spans=sum(item.evidence_spans for item in documents.results),
             works_ranked=ranking.works_ranked,
+            source_counts={
+                "arxiv": sync_result.ingestion.records_seen,
+                **{item.source_key: item.fetched for item in multi_source.sources},
+            },
         )
         analysis_timeout = httpx.Timeout(
             connect=self._settings.http.connect_timeout_seconds,
@@ -403,7 +419,7 @@ class ProductionDailyRunner:
 
     def _config_snapshot(self) -> JsonObject:
         return {
-            "source": "arxiv",
+            "source": "registry-v1.1",
             "maximum_records": self._settings.scheduler.maximum_records,
             "lookback_hours": self._settings.scheduler.lookback_hours,
             "document_limit": self._settings.scheduler.document_limit,

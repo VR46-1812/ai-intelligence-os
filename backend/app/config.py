@@ -162,7 +162,14 @@ class SourceSettings(BaseModel):
         "stat.ML",
     )
     openreview_enabled: bool = True
+    openreview_venues: tuple[str, ...] = ("ICLR.cc/2026/Conference",)
     github_enrichment_enabled: bool = True
+    huggingface_enabled: bool = True
+    rss_enabled: bool = True
+    rss_feeds: tuple[str, ...] = (
+        "https://huggingface.co/blog/feed.xml",
+        "https://deepmind.google/blog/rss.xml",
+    )
     metadata_overlap_hours: int = Field(default=24, ge=1, le=168)
     github_token: SecretStr | None = None
 
@@ -172,6 +179,15 @@ class SourceSettings(BaseModel):
             raise ValueError("arxiv_categories must include at least one phase-one category")
         if len(self.arxiv_categories) != len(set(self.arxiv_categories)):
             raise ValueError("arxiv_categories must not contain duplicates")
+        if self.openreview_enabled and not self.openreview_venues:
+            raise ValueError("openreview_venues must not be empty when OpenReview is enabled")
+        if len(self.openreview_venues) != len(set(self.openreview_venues)):
+            raise ValueError("openreview_venues must not contain duplicates")
+        if self.rss_enabled and not self.rss_feeds:
+            raise ValueError("rss_feeds must not be empty when RSS is enabled")
+        for feed in self.rss_feeds:
+            if not feed.startswith("https://"):
+                raise ValueError("rss_feeds must use HTTPS")
         return self
 
 

@@ -54,6 +54,7 @@ const paper: CatalogPaper = {
     technical_components: { R: 20, E: 9.75 },
     calculated_at: "2026-07-20T00:00:00Z",
   },
+  linked_sources: [],
 };
 
 function jsonResponse(payload: unknown, status = 200): Response {

@@ -23,6 +23,7 @@ from app.catalog.read_models import (
     CatalogTopic,
 )
 from app.domain.models import ExternalIdType
+from app.multisource.models import LinkedSourceEvidence
 from app.repositories.sqlite import RepositoryDataError, RepositoryError
 
 _TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
@@ -133,8 +134,11 @@ class SQLiteCatalogReadRepository:
                 ORDER BY t.display_name, t.topic_key"""
             ).fetchall()
             source_rows = self._connection.execute(
-                f"""SELECT DISTINCT s.source_key, s.display_name {_BASE_FROM}
-                WHERE {_BASE_WHERE} ORDER BY s.display_name, s.source_key"""
+                f"""SELECT source_key,display_name FROM (
+                SELECT DISTINCT s.source_key, s.display_name {_BASE_FROM} WHERE {_BASE_WHERE}
+                UNION SELECT DISTINCT s.source_key,s.display_name FROM sources s
+                JOIN source_artifacts a ON a.source_key=s.source_key)
+                ORDER BY display_name,source_key"""
             ).fetchall()
         except sqlite3.Error as error:
             raise RepositoryError("query catalog filter options failed") from error
@@ -167,8 +171,13 @@ class SQLiteCatalogReadRepository:
             )
             parameters.append(query.topic)
         if query.source is not None:
-            clauses.append("AND s.source_key = ?")
-            parameters.append(query.source)
+            clauses.append(
+                "AND (s.source_key = ? OR EXISTS (SELECT 1 FROM linked_events le "
+                "JOIN linked_event_artifacts lea ON lea.event_id=le.id "
+                "JOIN source_artifacts sa ON sa.id=lea.artifact_id "
+                "WHERE le.primary_work_id=w.id AND sa.source_key=?))"
+            )
+            parameters.extend((query.source, query.source))
         if query.published_from is not None:
             clauses.append("AND COALESCE(v.published_at, w.first_published_at) >= ?")
             parameters.append(SQLiteCatalogReadRepository._start_of_day(query.published_from))
@@ -231,12 +240,21 @@ class SQLiteCatalogReadRepository:
                 ORDER BY wt.work_id, t.display_name, t.topic_key""",
                 work_ids,
             ).fetchall()
+            source_artifact_rows = self._connection.execute(
+                f"""SELECT e.primary_work_id work_id,a.*,l.relationship
+                FROM linked_events e JOIN linked_event_artifacts l ON l.event_id=e.id
+                JOIN source_artifacts a ON a.id=l.artifact_id
+                WHERE e.primary_work_id IN ({placeholders})
+                ORDER BY e.primary_work_id,a.authority DESC,a.source_key,a.id""",
+                work_ids,
+            ).fetchall()
         except sqlite3.Error as error:
             raise RepositoryError("hydrate catalog papers failed") from error
 
         authors: defaultdict[str, list[CatalogAuthor]] = defaultdict(list)
         identities: defaultdict[str, list[CatalogIdentity]] = defaultdict(list)
         topics: defaultdict[str, list[CatalogTopic]] = defaultdict(list)
+        linked_sources: defaultdict[str, list[LinkedSourceEvidence]] = defaultdict(list)
         for row in author_rows:
             authors[str(row["work_id"])].append(
                 CatalogAuthor(
@@ -258,6 +276,22 @@ class SQLiteCatalogReadRepository:
         for row in topic_rows:
             topics[str(row["work_id"])].append(
                 CatalogTopic(key=str(row["topic_key"]), name=str(row["display_name"]))
+            )
+        for row in source_artifact_rows:
+            linked_sources[str(row["work_id"])].append(
+                LinkedSourceEvidence(
+                    artifact_id=str(row["id"]),
+                    source_key=str(row["source_key"]),
+                    artifact_type=str(row["artifact_type"]),
+                    title=str(row["title"]),
+                    canonical_url=str(row["canonical_url"]),
+                    relationship=str(row["relationship"]),
+                    content_class=str(row["content_class"]),
+                    authority=float(row["authority"]),
+                    freshness=float(row["freshness"]),
+                    novelty=float(row["novelty"]),
+                    published_at=row["published_at"],
+                )
             )
 
         papers: list[CatalogPaper] = []
@@ -312,6 +346,7 @@ class SQLiteCatalogReadRepository:
                             ),
                             calculated_at=row["ranking_calculated_at"],
                         ),
+                        "linked_sources": tuple(linked_sources[work_id]),
                     }
                 )
             )

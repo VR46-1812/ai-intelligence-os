@@ -15,6 +15,20 @@ export interface CatalogTopic {
   readonly name: string;
 }
 
+export interface LinkedSourceEvidence {
+  readonly artifact_id: string;
+  readonly source_key: string;
+  readonly artifact_type: string;
+  readonly title: string;
+  readonly canonical_url: string;
+  readonly relationship: string;
+  readonly content_class: "fact" | "interpretation" | "community_reaction" | "commercial_hypothesis";
+  readonly authority: number;
+  readonly freshness: number;
+  readonly novelty: number;
+  readonly published_at: string | null;
+}
+
 export interface CatalogPaper {
   readonly id: string;
   readonly title: string;
@@ -42,6 +56,7 @@ export interface CatalogPaper {
     readonly technical_components: Readonly<Record<string, number>>;
     readonly calculated_at: string | null;
   };
+  readonly linked_sources: readonly LinkedSourceEvidence[];
 }
 
 export interface EvidenceItem {
@@ -139,6 +154,15 @@ function isTopic(value: unknown): value is CatalogTopic {
   return isRecord(value) && typeof value.key === "string" && typeof value.name === "string";
 }
 
+function isLinkedSource(value: unknown): value is LinkedSourceEvidence {
+  return isRecord(value) && typeof value.artifact_id === "string" &&
+    typeof value.source_key === "string" && typeof value.artifact_type === "string" &&
+    typeof value.title === "string" && typeof value.canonical_url === "string" &&
+    typeof value.relationship === "string" && typeof value.content_class === "string" &&
+    typeof value.authority === "number" && typeof value.freshness === "number" &&
+    typeof value.novelty === "number" && isStringOrNull(value.published_at);
+}
+
 function isPaper(value: unknown): value is CatalogPaper {
   if (!isRecord(value)) return false;
   const ranking = value.ranking;
@@ -156,6 +180,7 @@ function isPaper(value: unknown): value is CatalogPaper {
     Array.isArray(value.authors) && value.authors.every(isAuthor) &&
     Array.isArray(value.identities) && value.identities.every(isIdentity) &&
     Array.isArray(value.topics) && value.topics.every(isTopic) &&
+    Array.isArray(value.linked_sources) && value.linked_sources.every(isLinkedSource) &&
     typeof value.source_key === "string" &&
     typeof value.source_name === "string" &&
     isStringOrNull(value.external_url) &&
@@ -327,7 +352,7 @@ export function safeExternalUrl(value: string | null): string | null {
   if (value === null) return null;
   try {
     const url = new URL(value);
-    const allowedHosts = new Set(["arxiv.org", "www.arxiv.org", "doi.org", "dx.doi.org"]);
+    const allowedHosts = new Set(["arxiv.org", "www.arxiv.org", "doi.org", "dx.doi.org", "openreview.net", "www.openreview.net", "github.com", "www.github.com", "huggingface.co", "deepmind.google"]);
     return url.protocol === "https:" && allowedHosts.has(url.hostname.toLowerCase())
       ? url.toString()
       : null;

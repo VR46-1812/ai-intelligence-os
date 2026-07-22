@@ -13,6 +13,7 @@ from app.config import (
     REPOSITORY_ROOT,
     AppSettings,
     ConfigurationError,
+    SourceSettings,
     initialize_directories,
     load_settings,
 )
@@ -49,6 +50,18 @@ def test_default_settings_encode_hard_resource_policy() -> None:
     assert settings.models.analyst.keep_alive_seconds == 0
     assert settings.ocr.enabled is False
     assert settings.ocr.suspicious_native_characters == 40
+    assert settings.sources.openreview_enabled is True
+    assert settings.sources.openreview_venues == ("ICLR.cc/2026/Conference",)
+    assert settings.sources.huggingface_enabled is True
+    assert settings.sources.rss_enabled is True
+    assert all(feed.startswith("https://") for feed in settings.sources.rss_feeds)
+
+
+def test_multisource_allowlists_reject_empty_or_insecure_configuration() -> None:
+    with pytest.raises(ValidationError, match="openreview_venues"):
+        SourceSettings(openreview_venues=())
+    with pytest.raises(ValidationError, match="HTTPS"):
+        SourceSettings(rss_feeds=("http://example.test/feed.xml",))
 
 
 def test_optional_ocr_configuration_is_typed_and_bounded(

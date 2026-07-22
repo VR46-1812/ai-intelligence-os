@@ -139,6 +139,14 @@ class ArxivIngestionService:
                     IdentityInput(id_type=identity.id_type, raw_value=identity.raw_value)
                     for identity in normalized.identities
                 ),
+                metadata={
+                    "source_key": normalized.source_key,
+                    "canonical_url": normalized.canonical_url,
+                    "repository_urls": list(normalized.repository_urls),
+                    "document_urls": list(normalized.document_urls),
+                    "source_topics": list(normalized.source_topics),
+                    "extra": normalized.extra,
+                },
             )
             with self._transaction_factory():
                 resolution = self._catalog.resolve(catalog_record)

@@ -43,6 +43,7 @@ class FeatureSnapshot(TypedDict):
     technical_penalty: int
     critical_topic: int
     methods: dict[str, str]
+    source_signals: dict[str, float]
     as_of: str
 
 
@@ -84,6 +85,16 @@ class DeterministicRankingEngine:
                 AND x.id_type='github') has_code,
               EXISTS(SELECT 1 FROM analysis_runs a WHERE a.work_id=w.id
                 AND a.status='succeeded') analyzed
+              ,COALESCE((SELECT MAX(sa.authority) FROM linked_events le
+                JOIN linked_event_artifacts lea ON lea.event_id=le.id
+                JOIN source_artifacts sa ON sa.id=lea.artifact_id
+                WHERE le.primary_work_id=w.id),0) linked_authority
+              ,COALESCE((SELECT MAX(sa.novelty) FROM linked_events le
+                JOIN linked_event_artifacts lea ON lea.event_id=le.id
+                JOIN source_artifacts sa ON sa.id=lea.artifact_id
+                WHERE le.primary_work_id=w.id),0) linked_novelty
+              ,COALESCE((SELECT MAX(le.corroboration) FROM linked_events le
+                WHERE le.primary_work_id=w.id),0) linked_corroboration
             FROM works w
             JOIN work_versions v ON v.id=w.current_version_id
             JOIN source_records sr ON sr.id=v.source_record_id
@@ -173,16 +184,19 @@ class DeterministicRankingEngine:
         source_quality = {"A": 1.0, "B": 0.75, "C": 0.5, "D": 0.25}.get(str(row["trust_tier"]), 0.5)
         if str(row["publication_status"]) == "preprint":
             source_quality *= 0.9
+        linked_authority = float(row["linked_authority"])
+        linked_novelty = float(row["linked_novelty"])
+        linked_corroboration = float(row["linked_corroboration"])
         has_document = bool(row["has_document"])
         has_code = bool(row["has_code"])
         technical = {
             "R": relevance,
-            "N": 0.5,
+            "N": min(1.0, 0.5 + 0.2 * linked_novelty + 0.1 * linked_corroboration),
             "E": 0.65 if has_document else 0.25,
             "P": 0.9 if has_code and has_document else (0.55 if has_document else 0.25),
             "I": 0.5,
             "M": 0.5,
-            "Q": source_quality,
+            "Q": max(source_quality, linked_authority),
             "F": freshness,
         }
         commercial = {key: 0.5 for key in COMMERCIAL_WEIGHTS}
@@ -199,6 +213,16 @@ class DeterministicRankingEngine:
                 "relevance": f"taxonomy user weights {self._taxonomy.taxonomy_version}",
                 "semantic_features": "neutral 0.5; no local model invoked",
                 "evidence_strength": "primary-document availability proxy",
+                "linked_sources": (
+                    "exact-identity/explicit-URL authority, novelty, and corroboration; "
+                    "primary evidence remains authoritative"
+                ),
+            },
+            "source_signals": {
+                "authority": linked_authority,
+                "freshness": freshness,
+                "novelty": linked_novelty,
+                "corroboration": linked_corroboration,
             },
             "as_of": now.isoformat(),
         }

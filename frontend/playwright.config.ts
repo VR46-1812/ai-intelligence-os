@@ -21,21 +21,18 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "uv run uvicorn app.main:app --host 127.0.0.1 --port 8010",
+      command: "uv run uvicorn app.main:app --host 127.0.0.1 --port 8000",
       cwd: backendDirectory,
       env: {
         UV_CACHE_DIR: localUvCache,
       },
-      url: "http://127.0.0.1:8010/health",
+      url: "http://127.0.0.1:8000/health",
       reuseExistingServer: true,
       timeout: 30_000,
     },
     {
       command: "npm run dev",
       cwd: fileURLToPath(new URL(".", import.meta.url)),
-      env: {
-        VITE_API_PROXY_TARGET: "http://127.0.0.1:8010",
-      },
       url: "http://127.0.0.1:5173",
       reuseExistingServer: true,
       timeout: 30_000,

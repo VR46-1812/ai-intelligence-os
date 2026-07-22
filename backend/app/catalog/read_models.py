@@ -10,6 +10,7 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.models import ExternalIdType, PublicationStatus, UtcDateTime
+from app.multisource.models import LinkedSourceEvidence
 
 _SEARCH_TOKEN = re.compile(r"[^\W_]+", re.UNICODE)
 
@@ -101,6 +102,7 @@ class CatalogPaper(CatalogModel):
     document_status: str
     evidence_count: int = Field(ge=0)
     ranking: CatalogRanking
+    linked_sources: tuple[LinkedSourceEvidence, ...] = ()
 
 
 class CatalogPaperPage(CatalogModel):

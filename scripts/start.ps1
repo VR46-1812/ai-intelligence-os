@@ -25,6 +25,12 @@ finally { Pop-Location }
 $backend = $null
 $frontend = $null
 try {
+    foreach ($port in @(8000, 5173)) {
+        $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        if ($null -ne $listener) {
+            throw "Port $port is already in use. Stop the existing local process before startup."
+        }
+    }
     $backend = Start-Process `
         -FilePath (Join-Path $root "backend\.venv\Scripts\python.exe") `
         -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000") `
@@ -41,9 +47,6 @@ try {
         -RedirectStandardError (Join-Path $cache "frontend.err.log") `
         -WindowStyle Hidden `
         -PassThru
-    @{ backend = $backend.Id; frontend = $frontend.Id } |
-        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $cache "local-app-pids.json")
-
     $ready = $false
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
         try {
@@ -59,6 +62,12 @@ try {
     if (-not $ready) {
         throw "Local services did not become ready. Check .cache backend/frontend logs."
     }
+    $backendListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction Stop |
+        Select-Object -First 1
+    $frontendListener = Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction Stop |
+        Select-Object -First 1
+    @{ backend = $backendListener.OwningProcess; frontend = $frontendListener.OwningProcess } |
+        ConvertTo-Json | Set-Content -LiteralPath (Join-Path $cache "local-app-pids.json")
     Write-Output "AI Intelligence OS started."
     Write-Output "UI: http://127.0.0.1:5173"
     Write-Output "API: http://127.0.0.1:8000/docs"

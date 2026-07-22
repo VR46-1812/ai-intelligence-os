@@ -16,6 +16,7 @@ from app.domain.models import (
     Author,
     ExternalIdentifier,
     ExternalIdType,
+    JsonObject,
     LifecycleState,
     PageRequest,
     PublicationStatus,
@@ -78,6 +79,7 @@ class CatalogRecord(CatalogModel):
     content_sha256: str = Field(min_length=1)
     first_author: str | None = None
     identities: tuple[IdentityInput, ...] = Field(min_length=1)
+    metadata: JsonObject = Field(default_factory=dict)
 
 
 class IdentityResolutionStatus(StrEnum):
@@ -307,6 +309,7 @@ class CatalogIdentityService:
                 content_sha256=record.content_sha256,
                 title=record.title,
                 abstract=record.abstract,
+                metadata=record.metadata,
                 source_record_id=record.source_record_id,
                 published_at=record.published_at,
                 observed_at=record.observed_at,
@@ -359,6 +362,7 @@ class CatalogIdentityService:
                 content_sha256=record.content_sha256,
                 title=record.title,
                 abstract=record.abstract,
+                metadata=record.metadata,
                 source_record_id=record.source_record_id,
                 published_at=record.published_at,
                 observed_at=record.observed_at,

@@ -12,6 +12,7 @@ export interface DailyCounts {
   readonly deep_dives_generated: number;
   readonly deep_dives_cached: number;
   readonly files_cleaned: number;
+  readonly source_counts: Readonly<Record<string, number>>;
 }
 
 export interface DailyRunResult {
@@ -83,7 +84,8 @@ function counts(value: unknown): value is DailyCounts {
   return record(value) && ["fetched", "normalized", "documents_processed", "documents_failed",
     "evidence_spans", "works_ranked", "briefs_generated", "briefs_cached",
     "deep_dives_generated", "deep_dives_cached", "files_cleaned"]
-    .every((key) => typeof value[key] === "number");
+    .every((key) => typeof value[key] === "number") && record(value.source_counts) &&
+    Object.values(value.source_counts).every((item) => typeof item === "number");
 }
 
 function run(value: unknown): value is DailyRunResult {

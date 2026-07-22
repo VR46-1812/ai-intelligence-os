@@ -41,6 +41,7 @@ ATOM = "{http://www.w3.org/2005/Atom}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
 OPENSEARCH = "{http://a9.com/-/spec/opensearch/1.1/}"
 _WHITESPACE = re.compile(r"\s+")
+_GITHUB_URL = re.compile(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", re.IGNORECASE)
 
 
 class ArxivHttpClient(Protocol):
@@ -66,6 +67,7 @@ class ArxivFetchedEntry(BaseModel):
 
 
 class ArxivConnector:
+    contract_version = "1.0"
     key = "arxiv"
     trust_tier = TrustTier.A
     connector_version = "arxiv-v1"
@@ -211,6 +213,16 @@ class ArxivConnector:
             )
             stable_id = arxiv_identity.normalized_value
             version = arxiv_identity.version_label or record.upstream_version or "v1"
+            summary = self._clean(entry.findtext(f"{ATOM}summary"))
+            comment = self._clean(entry.findtext(f"{ARXIV}comment"))
+            repository_urls = tuple(
+                dict.fromkeys(
+                    match.group(0).rstrip(".,);]")
+                    for text in (summary, comment)
+                    if text
+                    for match in _GITHUB_URL.finditer(text)
+                )
+            )
             return NormalizedRecord(
                 source_key=self.key,
                 upstream_id=stable_id,
@@ -218,7 +230,7 @@ class ArxivConnector:
                 work_type=WorkType.PAPER,
                 title=title,
                 normalized_title=normalize_title(title),
-                abstract=self._clean(entry.findtext(f"{ATOM}summary")),
+                abstract=summary,
                 canonical_url=f"{ARXIV_CANONICAL_ROOT}{stable_id}",
                 publication_status=PublicationStatus.PREPRINT,
                 published_at=published,
@@ -227,11 +239,11 @@ class ArxivConnector:
                 authors=authors,
                 source_topics=categories,
                 document_urls=pdf_urls,
-                repository_urls=(),
+                repository_urls=repository_urls,
                 license_hint=self._clean(entry.findtext(f"{ARXIV}license")),
                 extra={
                     "primary_category": self._primary_category(entry),
-                    "comment": self._clean(entry.findtext(f"{ARXIV}comment")),
+                    "comment": comment,
                     "journal_reference": self._clean(entry.findtext(f"{ARXIV}journal_ref")),
                 },
             )
