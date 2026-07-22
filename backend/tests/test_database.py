@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import sqlite3
 from collections.abc import Iterator
@@ -13,10 +14,12 @@ import pytest
 from app.config import REPOSITORY_ROOT
 from app.db.backup import BackupError, backup_database, manifest_path, restore_database
 from app.db.connection import DatabaseConnectionError, SQLiteDatabase, transaction
+from app.db.migration_repair import MigrationRepairError, repair_migration_7_checksum
 from app.db.migrations import (
     DEFAULT_MIGRATIONS_DIRECTORY,
     MigrationError,
     MigrationRunner,
+    discover_migrations,
 )
 
 FIXTURES_DIRECTORY = Path(__file__).with_name("fixtures")
@@ -59,6 +62,92 @@ def _insert_source(connection: sqlite3.Connection, source_id: str = "source-1") 
             "2026-07-17T00:00:00Z",
         ),
     )
+
+
+def _seed_repair_preservation_graph(connection: sqlite3.Connection) -> None:
+    now = "2026-07-22T00:00:00Z"
+    connection.execute(
+        """
+        INSERT INTO works(
+          id, work_type, canonical_title, normalized_title, created_at, updated_at
+        ) VALUES ('repair-work', 'paper', 'Repair Paper', 'repair paper', ?, ?)
+        """,
+        (now, now),
+    )
+    connection.execute(
+        """
+        INSERT INTO work_versions(
+          id, work_id, version_label, title, observed_at, is_current
+        ) VALUES ('repair-version', 'repair-work', 'v1', 'Repair Paper', ?, 1)
+        """,
+        (now,),
+    )
+    connection.execute(
+        """
+        INSERT INTO documents(
+          id, work_version_id, document_role, source_url, local_path, media_type,
+          byte_size, sha256, acquired_at
+        ) VALUES (
+          'repair-document', 'repair-version', 'paper_pdf', 'https://example.test/paper.pdf',
+          'raw/repair.pdf', 'application/pdf', 10, 'document-sha', ?
+        )
+        """,
+        (now,),
+    )
+    connection.execute(
+        """
+        INSERT INTO evidence_spans(
+          id, document_id, page_start, page_end, char_start, char_end,
+          span_text, normalized_text_sha256, created_at
+        ) VALUES ('repair-evidence', 'repair-document', 1, 1, 0, 8, 'Evidence', 'span-sha', ?)
+        """,
+        (now,),
+    )
+    connection.execute(
+        """
+        INSERT INTO pipeline_runs(
+          id, run_type, trigger_type, status, config_snapshot_json, queued_at
+        ) VALUES ('repair-run', 'daily', 'manual', 'succeeded', '{}', ?)
+        """,
+        (now,),
+    )
+    connection.execute(
+        """
+        INSERT INTO daily_reports(
+          report_date, schema_version, pipeline_run_id, input_fingerprint,
+          report_json, created_at, updated_at
+        ) VALUES ('2026-07-22', '1.0', 'repair-run', 'fingerprint', '{}', ?, ?)
+        """,
+        (now, now),
+    )
+    connection.execute(
+        """
+        INSERT INTO linked_events(
+          id, canonical_key, title, corroboration, created_at, updated_at
+        ) VALUES ('repair-event', 'repair-key', 'Repair Event', 0.5, ?, ?)
+        """,
+        (now, now),
+    )
+    connection.execute(
+        """
+        INSERT INTO agent_executions(
+          id, pipeline_run_id, agent_id, agent_version, stage_order, responsibility,
+          status, idempotency_key, created_at, updated_at
+        ) VALUES (
+          'repair-agent', 'repair-run', 'orchestrator', '1.0', 1, 'coordinate',
+          'succeeded', 'repair-idempotency', ?, ?
+        )
+        """,
+        (now, now),
+    )
+
+
+def _alternate_line_ending_checksum() -> str:
+    migration = next(item for item in discover_migrations() if item.version == 7)
+    raw = migration.sql.encode()
+    lf = raw.replace(b"\r\n", b"\n")
+    alternate = lf if raw != lf else lf.replace(b"\n", b"\r\n")
+    return hashlib.sha256(alternate).hexdigest()
 
 
 def test_numbered_initial_migration_matches_contract() -> None:
@@ -147,6 +236,96 @@ def test_applied_migration_checksum_drift_is_rejected(database_path: Path) -> No
 
     with pytest.raises(MigrationError, match="checksum drift"):
         MigrationRunner(database).migrate()
+
+
+def test_migration_7_repair_preserves_records_and_starts(database_path: Path) -> None:
+    database = _migrate(database_path)
+    connection = database.connect()
+    try:
+        _seed_repair_preservation_graph(connection)
+        connection.execute(
+            "UPDATE schema_migrations SET checksum=? WHERE version=7",
+            (_alternate_line_ending_checksum(),),
+        )
+    finally:
+        connection.close()
+
+    result = repair_migration_7_checksum(database, database_path.parent, apply=True)
+
+    assert result.repaired is True
+    assert result.backup_verified is True
+    assert result.schema_comparison.equivalent is True
+    assert {record.table: record.row_count for record in result.preserved_records} == {
+        "works": 1,
+        "documents": 1,
+        "evidence_spans": 1,
+        "linked_events": 1,
+        "daily_reports": 1,
+        "agent_executions": 1,
+    }
+    assert result.audit_path is not None and Path(result.audit_path).is_file()
+    assert MigrationRunner(database).migrate() == ()
+
+
+def test_migration_7_repair_refuses_schema_difference(database_path: Path) -> None:
+    database = _migrate(database_path)
+    connection = database.connect()
+    try:
+        connection.execute("DROP INDEX idx_agent_executions_run_order")
+        connection.execute(
+            "UPDATE schema_migrations SET checksum=? WHERE version=7",
+            (_alternate_line_ending_checksum(),),
+        )
+    finally:
+        connection.close()
+
+    with pytest.raises(MigrationRepairError, match="schema is not equivalent"):
+        repair_migration_7_checksum(database, database_path.parent, apply=True)
+    connection = database.connect()
+    try:
+        assert (
+            connection.execute("SELECT checksum FROM schema_migrations WHERE version=7").fetchone()[
+                0
+            ]
+            == _alternate_line_ending_checksum()
+        )
+    finally:
+        connection.close()
+
+
+def test_migration_7_repair_is_idempotent(database_path: Path) -> None:
+    database = _migrate(database_path)
+    connection = database.connect()
+    try:
+        connection.execute(
+            "UPDATE schema_migrations SET checksum=? WHERE version=7",
+            (_alternate_line_ending_checksum(),),
+        )
+    finally:
+        connection.close()
+
+    first = repair_migration_7_checksum(database, database_path.parent, apply=True)
+    second = repair_migration_7_checksum(database, database_path.parent, apply=True)
+
+    assert first.repaired is True
+    assert second.repaired is False
+    assert second.old_checksum == second.new_checksum == first.new_checksum
+
+
+def test_migration_7_repair_does_not_mask_other_checksum_drift(database_path: Path) -> None:
+    database = _migrate(database_path)
+    connection = database.connect()
+    try:
+        connection.execute("UPDATE schema_migrations SET checksum='changed' WHERE version=1")
+        connection.execute(
+            "UPDATE schema_migrations SET checksum=? WHERE version=7",
+            (_alternate_line_ending_checksum(),),
+        )
+    finally:
+        connection.close()
+
+    with pytest.raises(MigrationRepairError, match="Migration 1 checksum drift remains blocked"):
+        repair_migration_7_checksum(database, database_path.parent, apply=True)
 
 
 def test_failed_migration_rolls_back_schema_and_history(database_path: Path) -> None:

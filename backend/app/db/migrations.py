@@ -31,6 +31,17 @@ class Migration:
     sql: str
     path: Path
 
+    def accepts_checksum(self, checksum: str) -> bool:
+        """Accept only byte-identical SQL modulo Git-safe CRLF/LF conversion."""
+        raw = self.sql.encode("utf-8")
+        lf = raw.replace(b"\r\n", b"\n")
+        crlf = lf.replace(b"\n", b"\r\n")
+        return checksum in {
+            self.checksum,
+            hashlib.sha256(lf).hexdigest(),
+            hashlib.sha256(crlf).hexdigest(),
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class AppliedMigration:
@@ -213,7 +224,7 @@ class MigrationRunner:
                     f"Migration {record.version} name drift: "
                     f"database={record.name}, file={migration.name}"
                 )
-            if record.checksum != migration.checksum:
+            if not migration.accepts_checksum(record.checksum):
                 raise MigrationError(
                     f"Migration {record.version} checksum drift for {migration.path.name}"
                 )

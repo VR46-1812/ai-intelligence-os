@@ -24,6 +24,10 @@ finally { Pop-Location }
 
 $backend = $null
 $frontend = $null
+$backendOutLog = Join-Path $cache "backend.out.log"
+$backendErrorLog = Join-Path $cache "backend.err.log"
+$frontendOutLog = Join-Path $cache "frontend.out.log"
+$frontendErrorLog = Join-Path $cache "frontend.err.log"
 try {
     foreach ($port in @(8000, 5173)) {
         $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
@@ -35,16 +39,16 @@ try {
         -FilePath (Join-Path $root "backend\.venv\Scripts\python.exe") `
         -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000") `
         -WorkingDirectory (Join-Path $root "backend") `
-        -RedirectStandardOutput (Join-Path $cache "backend.out.log") `
-        -RedirectStandardError (Join-Path $cache "backend.err.log") `
+        -RedirectStandardOutput $backendOutLog `
+        -RedirectStandardError $backendErrorLog `
         -WindowStyle Hidden `
         -PassThru
     $frontend = Start-Process `
         -FilePath "node.exe" `
         -ArgumentList @((Join-Path $root "frontend\node_modules\vite\bin\vite.js"), "--host", "127.0.0.1", "--port", "5173", "--strictPort") `
         -WorkingDirectory (Join-Path $root "frontend") `
-        -RedirectStandardOutput (Join-Path $cache "frontend.out.log") `
-        -RedirectStandardError (Join-Path $cache "frontend.err.log") `
+        -RedirectStandardOutput $frontendOutLog `
+        -RedirectStandardError $frontendErrorLog `
         -WindowStyle Hidden `
         -PassThru
     $ready = $false
@@ -60,7 +64,19 @@ try {
         catch { Start-Sleep -Milliseconds 250 }
     }
     if (-not $ready) {
-        throw "Local services did not become ready. Check .cache backend/frontend logs."
+        $failedService = "local services"
+        if ($null -ne $backend -and $backend.HasExited) { $failedService = "backend" }
+        elseif ($null -ne $frontend -and $frontend.HasExited) { $failedService = "frontend" }
+        Write-Host "Startup failure: $failedService did not become ready." -ForegroundColor Red
+        if (Test-Path -LiteralPath $backendErrorLog) {
+            Write-Host "Backend error log tail ($backendErrorLog):" -ForegroundColor Yellow
+            Get-Content -LiteralPath $backendErrorLog -Tail 40 | Write-Host
+        }
+        if ($failedService -eq "frontend" -and (Test-Path -LiteralPath $frontendErrorLog)) {
+            Write-Host "Frontend error log tail ($frontendErrorLog):" -ForegroundColor Yellow
+            Get-Content -LiteralPath $frontendErrorLog -Tail 40 | Write-Host
+        }
+        throw "$failedService startup failed. See the log tail above."
     }
     $backendListener = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction Stop |
         Select-Object -First 1
