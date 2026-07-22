@@ -1,6 +1,6 @@
 # AI Intelligence OS — Build Specification
 
-This package is the source of truth for building a zero-subscription-cost, local-first AI research intelligence system on Rujay's Windows laptop.
+This package is the source of truth for building a zero-subscription-cost, local-first AI research intelligence system .
 
 ## Reading order
 
@@ -24,7 +24,7 @@ Deliver a trustworthy daily AI intelligence workspace that discovers new develop
 
 ## V1 operator commands
 
-From `D:\Rujay\ai-intelligence-os`:
+From `D:\ai-intelligence-os`:
 
 ```powershell
 .\scripts\start.ps1
