@@ -33,6 +33,7 @@ test-results/
 data/**
 !data/.gitkeep
 models/
+prompts/
 *.gguf
 *.safetensors
 
